@@ -1,0 +1,35 @@
+import type { DemoState } from "./types";
+export function emptyState(): DemoState {
+  return {
+    products: [],
+    categories: [],
+    vendors: [],
+    customers: [],
+    orders: [],
+    sourcing: [],
+    banners: [],
+    vouchers: [],
+    returns: [],
+    team: [],
+    shippingZones: [],
+    cart: [],
+    wishlist: [],
+    savedForLater: [],
+    addresses: [],
+    audit: [],
+    customerSession: null,
+    adminSession: null,
+    location: { state: "Lagos", city: "" },
+    toasts: [],
+    settings: {
+      storeName: "Paydan",
+      supportEmail: "",
+      supportPhone: "",
+      businessHours: "Monday to Saturday, 9:00–18:00 WAT",
+      currency: "NGN",
+      announcement: "Thoughtfully sourced products, coordinated by Paydan",
+      paystackStatus: "not_connected",
+      transferEnabled: false,
+    },
+  };
+}

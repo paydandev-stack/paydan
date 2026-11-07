@@ -1,0 +1,26 @@
+.audit-hero { min-height: 27rem; padding: clamp(2.5rem, 6vw, 6rem); display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 3rem; border-radius: 1rem; background: var(--green-deep); color: white; }
+.audit-hero h1 { margin: 0; font: 500 clamp(3rem, 6vw, 6rem)/.92 var(--serif); letter-spacing: -.04em; }
+.audit-hero p { max-width: 40rem; color: #bdd1c4; line-height: 1.7; }
+.audit-score { min-width: 13rem; padding: 1.5rem; display: flex; flex-direction: column; border: 1px solid #346149; border-radius: .8rem; }
+.audit-score strong { font: 500 4rem/.9 var(--serif); color: var(--orange); }
+.audit-score span { margin: .7rem 0 1rem; font-size: .7rem; font-weight: 800; }
+.audit-score small { color: #9db8a6; }
+.audit-legend { padding: 2rem 0 1rem; display: flex; gap: 1.5rem; font-size: .65rem; font-weight: 800; }
+.audit-legend span::before { content: ""; width: .55rem; height: .55rem; margin-right: .4rem; display: inline-block; border-radius: 50%; }
+.audit-legend .complete::before { background: var(--green); }
+.audit-legend .partial::before { background: var(--orange); }
+.audit-legend .missing::before { background: #a6afa9; }
+.audit-list { border-top: 1px solid var(--border); }
+.audit-list article { padding: 1.5rem 0; display: grid; grid-template-columns: 1fr 1.25fr; gap: 2rem; border-bottom: 1px solid var(--border); }
+.audit-list h2 { margin: .5rem 0; font: 500 1.5rem var(--serif); }
+.audit-list p { max-width: 38rem; margin: 0; color: var(--muted); font-size: .68rem; line-height: 1.6; }
+.audit-status { padding: .3rem .5rem; border-radius: 2rem; font-size: .52rem; font-weight: 800; text-transform: uppercase; }
+.audit-status.complete { background: var(--green-soft); color: var(--green); }
+.audit-status.partial { background: var(--orange-soft); color: #925409; }
+.audit-status.not-started { background: var(--surface); color: var(--muted); }
+.audit-status.in-progress { background: #e8f0ff; color: #2457a7; }
+.route-chips { display: flex; flex-wrap: wrap; align-content: start; gap: .4rem; }
+.route-chips code { padding: .45rem .6rem; border: 1px solid var(--border); border-radius: .3rem; background: var(--surface); color: var(--green-deep); font-size: .6rem; }
+.audit-next { margin-top: 3rem; padding: 3rem; border-radius: .8rem; background: var(--orange-soft); }
+.audit-next h2 { max-width: 54rem; margin: 0; font: 500 clamp(2rem, 4vw, 3.5rem)/1 var(--serif); }
+.audit-next p { color: #76522c; font-size: .72rem; }

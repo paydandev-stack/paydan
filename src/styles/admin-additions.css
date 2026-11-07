@@ -1,0 +1,480 @@
+/* Extensions to the ported admin stylesheet. The original file only covered the
+   dashboard's KPI cards, table rows and status pills; these are the primitives
+   the rest of the console needs. Keep class names consistent with admin.css. */
+
+/* Sidebar navigation uses real links, so mirror the ported <button> rules. */
+.admin-sidebar a {
+  display: block;
+  padding: 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #bfd1c5;
+  text-align: left;
+  font-size: 0.68rem;
+}
+.admin-sidebar a.active {
+  background: var(--green);
+  color: white;
+  font-weight: 800;
+}
+.admin-sidebar a:hover {
+  color: white;
+}
+.admin-sidebar a.admin-brand {
+  width: fit-content;
+  margin-bottom: 0.35rem;
+  padding: 0;
+}
+.admin-sidebar > footer {
+  margin-top: auto;
+  padding: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid #346149;
+  background: transparent;
+}
+.admin-session-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.admin-session-avatar {
+  flex: 0 0 2rem;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid #4d765d;
+  border-radius: 50%;
+  background: #123d28;
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.admin-session-summary > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.admin-session-summary strong {
+  overflow: hidden;
+  color: white;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-session-summary small {
+  margin: 0;
+  color: #9fbaa9;
+  font-size: 0.54rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+.admin-session-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+.admin-sidebar .admin-session-actions a,
+.admin-sidebar .admin-session-actions button {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #346149;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #bfd1c5;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-align: center;
+}
+.admin-sidebar .admin-session-actions .primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
+}
+.admin-sidebar .admin-session-actions a:hover,
+.admin-sidebar .admin-session-actions button:hover {
+  color: white;
+  border-color: var(--green);
+}
+.admin-sidebar .admin-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+/* Page header supporting copy. */
+.admin-content header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.6;
+}
+.admin-content header .admin-actions {
+  justify-content: flex-end;
+}
+
+/* Buttons and action rows. */
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.admin-btn {
+  padding: 0.65rem 0.95rem;
+  border: 1px solid var(--green);
+  border-radius: 0.4rem;
+  background: var(--green);
+  color: white;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+.admin-btn.ghost {
+  background: white;
+  color: var(--green);
+}
+.admin-btn.quiet {
+  border-color: var(--border);
+  background: white;
+  color: var(--ink);
+}
+.admin-btn.danger {
+  border-color: #a23c31;
+  background: white;
+  color: #a23c31;
+}
+.admin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Cards and detail layouts. */
+.admin-panels {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+.admin-panels.wide {
+  grid-template-columns: 1fr;
+}
+.admin-card {
+  padding: 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: white;
+}
+.admin-card > h2 {
+  margin-top: 0;
+  font: 500 1.35rem var(--serif);
+}
+.admin-card > h3 {
+  margin-top: 0;
+  font: 600 0.95rem var(--serif);
+}
+.admin-card > p {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.7;
+}
+.admin-detail {
+  display: grid;
+  grid-template-columns: 1fr 20rem;
+  gap: 1rem;
+  align-items: start;
+}
+.admin-detail .admin-card {
+  min-width: 0;
+}
+
+/* Definition rows. */
+.admin-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.68rem;
+}
+.admin-meta div:last-child {
+  border-bottom: 0;
+}
+.admin-meta span {
+  color: var(--muted);
+}
+.admin-meta strong {
+  font-weight: 700;
+  text-align: right;
+}
+
+/* Filters, chips and inputs. */
+.admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.5rem 0 1rem;
+}
+.admin-filters .admin-input {
+  flex: 1 1 14rem;
+}
+.admin-input,
+.admin-select,
+.admin-textarea {
+  min-height: 2.5rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.68rem;
+}
+.admin-textarea {
+  min-height: 7rem;
+  line-height: 1.7;
+  resize: vertical;
+}
+.admin-input:focus-visible,
+.admin-select:focus-visible,
+.admin-textarea:focus-visible {
+  border-color: var(--green);
+}
+.admin-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.admin-chip {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  background: white;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+.admin-chip.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.admin-field.wide {
+  grid-column: 1 / -1;
+}
+.admin-field small {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.6rem;
+  line-height: 1.6;
+}
+
+/* Empty and messaging states. */
+.admin-empty {
+  padding: 3rem 1.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.6rem;
+  background: white;
+  text-align: center;
+}
+.admin-empty h3 {
+  margin: 0 0 0.4rem;
+  font: 500 1.5rem var(--serif);
+}
+.admin-empty p {
+  max-width: 30rem;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.7;
+}
+.admin-note {
+  padding: 0.8rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--orange-soft);
+  color: #704817;
+  font-size: 0.66rem;
+  line-height: 1.6;
+}
+.admin-notice {
+  padding: 0.8rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 0.66rem;
+  line-height: 1.6;
+}
+
+/* Session gate rendered by the console layout. */
+.admin-gate {
+  max-width: 34rem;
+  padding: 3rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.9rem;
+  background: white;
+}
+.admin-gate span {
+  color: var(--green);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.admin-gate h2 {
+  margin: 0.5rem 0 0.6rem;
+  font: 500 clamp(1.8rem, 4vw, 2.6rem)/1.05 var(--serif);
+  letter-spacing: -0.02em;
+}
+.admin-gate p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.8;
+}
+.admin-gate .admin-actions {
+  margin-top: 1.4rem;
+}
+
+/* Simple CSS charts for analytics. */
+.admin-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.55rem;
+  height: 12rem;
+}
+.admin-bars > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  height: 100%;
+}
+.admin-bars i {
+  display: block;
+  width: 100%;
+  border-radius: 0.25rem 0.25rem 0 0;
+  background: var(--green);
+}
+.admin-bars i.muted {
+  background: var(--green-soft);
+}
+.admin-bars span {
+  color: var(--muted);
+  font-size: 0.55rem;
+}
+.admin-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.admin-legend div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.66rem;
+}
+.admin-legend span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+.admin-legend span::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--green);
+}
+.admin-legend span.orange::before {
+  background: var(--orange);
+}
+.admin-legend span.blue::before {
+  background: #2457a7;
+}
+.admin-legend span.red::before {
+  background: #a23c31;
+}
+.admin-legend span.neutral::before {
+  background: #a6afa9;
+}
+
+/* Horizontal nav shown once the sidebar is dropped on phones. */
+.admin-mobile-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .admin-panels {
+    grid-template-columns: 1fr;
+  }
+  .admin-detail {
+    grid-template-columns: 1fr;
+  }
+  .admin-sidebar a {
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0;
+  }
+  .admin-sidebar a::first-letter {
+    font-size: 0.7rem;
+  }
+  .admin-session-summary > span:last-child {
+    display: none;
+  }
+  .admin-session-summary {
+    justify-content: center;
+  }
+  .admin-session-actions {
+    grid-template-columns: 1fr;
+  }
+  .admin-sidebar .admin-session-actions a,
+  .admin-sidebar .admin-session-actions button {
+    padding-inline: 0.2rem;
+    font-size: 0.48rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-mobile-nav {
+    display: flex;
+    gap: 0.4rem;
+    overflow-x: auto;
+    padding: 0.6rem 0 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .admin-mobile-nav a,
+  .admin-mobile-nav button {
+    flex: 0 0 auto;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 2rem;
+    background: white;
+    color: var(--ink);
+    font-size: 0.62rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .admin-mobile-nav a.active {
+    border-color: var(--green);
+    background: var(--green-soft);
+    color: var(--green);
+  }
+  .admin-gate {
+    padding: 1.6rem;
+  }
+  .admin-filters {
+    gap: 0.4rem;
+  }
+}

@@ -1,0 +1,55 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { put, transaction } from "@/server/db";
+import {
+  body,
+  failure,
+  json,
+  limit,
+  requireUser,
+  sameOrigin,
+  viewer,
+} from "@/server/http";
+export async function POST(request: Request) {
+  try {
+    sameOrigin(request);
+    const user = await viewer(request.headers);
+    requireUser(user);
+    await limit(`support:${user.id}`, 5, 3600);
+    const input = z
+      .object({
+        subject: z.string().trim().min(3).max(200),
+        message: z.string().trim().min(10).max(5000),
+      })
+      .parse(await body(request));
+    const id = randomUUID();
+    await transaction(async (db) => {
+      await put(
+        db,
+        "support",
+        id,
+        {
+          id,
+          ...input,
+          customerId: user.id,
+          email: user.email,
+          status: "open",
+          createdAt: new Date().toISOString(),
+        },
+        user.id,
+      );
+      await db.query(
+        "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
+        [
+          randomUUID(),
+          user.email,
+          `PAYDAN support request ${id.slice(0, 8)}`,
+          "Your message has been received. Our team will reply to your verified email.",
+        ],
+      );
+    });
+    return json({ reference: id.slice(0, 8) });
+  } catch (error) {
+    return failure(error);
+  }
+}

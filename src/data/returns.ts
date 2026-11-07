@@ -1,0 +1,47 @@
+import "server-only";
+import type { ReturnRequest } from "@/lib/types";
+
+export const seedReturns: ReturnRequest[] = [
+  {
+    id: "r-1",
+    reference: "RT-2026-018",
+    orderId: "pd-2026-1062",
+    customerId: "c-6",
+    productId: "p-24",
+    productName: "Classic Leather Carryall",
+    quantity: 1,
+    reason: "Item does not match description",
+    detail: "The strap colour is noticeably darker than the listing photo.",
+    status: "under_review",
+    createdAt: "2026-10-31T12:20:00Z",
+    adminNote: "Photos requested from the customer.",
+  },
+  {
+    id: "r-2",
+    reference: "RT-2026-017",
+    orderId: "pd-2026-1051",
+    customerId: "c-1",
+    productId: "p-26",
+    productName: "Structured Tote Bag",
+    quantity: 1,
+    reason: "Changed my mind",
+    detail: "No longer needed; unopened and in original packaging.",
+    status: "requested",
+    createdAt: "2026-10-30T08:05:00Z",
+    adminNote: "",
+  },
+  {
+    id: "r-3",
+    reference: "RT-2026-016",
+    orderId: "pd-2026-1055",
+    customerId: "c-5",
+    productId: "p-38",
+    productName: "Shea Butter Body Ritual Set",
+    quantity: 1,
+    reason: "Item arrived damaged",
+    detail: "Seal was broken on arrival and the body oil leaked in transit.",
+    status: "approved",
+    createdAt: "2026-10-24T16:40:00Z",
+    adminNote: "Return approved after supplier confirmed a replacement unit.",
+  },
+];

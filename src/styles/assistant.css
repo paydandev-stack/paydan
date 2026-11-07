@@ -1,0 +1,228 @@
+/* Ask PAYDAN assistant (§6). Mounted once in the root layout so the thread
+   survives navigation. Floating bottom-right: clear of sticky CTAs, and lifted
+   above the mobile tab bar when it is present. */
+
+.ask-launcher,
+.ask-peek {
+  position: fixed;
+  z-index: 55;
+  right: 1rem;
+  bottom: 1rem;
+  border: 0;
+  box-shadow: var(--shadow-overlay);
+}
+
+.ask-launcher {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .8rem 1.1rem;
+  border-radius: 3rem;
+  background: var(--green-deep);
+  color: white;
+  font-size: .72rem;
+  font-weight: 800;
+}
+.ask-launcher svg { width: 1.05rem; color: var(--orange); }
+.ask-launcher:hover { background: var(--green); }
+
+/* Minimized resting state: keeps the last answer one click away. */
+.ask-peek {
+  max-width: min(100% - 2rem, 22rem);
+  padding: .6rem .9rem;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  border-radius: 2rem;
+  background: var(--green-deep);
+  color: white;
+  text-align: left;
+}
+.ask-peek svg { flex: 0 0 auto; width: 1rem; color: var(--orange); }
+.ask-peek span { min-width: 0; font-size: .66rem; }
+.ask-peek strong { display: block; font-size: .62rem; }
+.ask-peek em {
+  display: block;
+  overflow: hidden;
+  color: #9db8a6;
+  font-size: .58rem;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-panel {
+  position: fixed;
+  z-index: 55;
+  right: 1rem;
+  bottom: 5rem;
+  width: min(100% - 2rem, 26rem);
+  height: min(72vh, 34rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: .9rem;
+  background: white;
+  box-shadow: var(--shadow-overlay);
+  transition: width .18s ease, height .18s ease;
+}
+.ask-panel.expanded { width: min(100% - 2rem, 44rem); height: min(80vh, 42rem); }
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .8rem 1rem;
+  background: var(--green-deep);
+  color: white;
+}
+.ask-head h2 { margin: 0; font-size: .82rem; font-weight: 800; }
+.ask-head small { display: block; margin-top: .1rem; color: #9db8a6; font-size: .55rem; font-weight: 500; }
+.ask-badge {
+  padding: .15rem .4rem;
+  border-radius: .3rem;
+  background: var(--orange);
+  color: var(--ink);
+  font-size: .5rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+.ask-tools { margin-left: auto; display: flex; align-items: center; gap: .25rem; }
+.ask-tools button {
+  min-width: 1.9rem;
+  height: 1.9rem;
+  padding: 0 .45rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: .35rem;
+  background: transparent;
+  color: #bfd1c5;
+  font-size: .58rem;
+  font-weight: 800;
+}
+.ask-tools button:hover, .ask-tools button:focus-visible { background: rgba(255, 255, 255, .14); color: white; }
+.ask-tools svg { width: .95rem; }
+
+/* Expansion is a desktop affordance; phones always use full-screen. */
+.ask-tools .ask-expand { display: none; }
+@media (min-width: 601px) {
+  .ask-tools .ask-expand { display: grid; width: auto; padding: 0 .55rem; }
+}
+
+.ask-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  background: var(--surface);
+}
+
+.ask-msg {
+  max-width: 92%;
+  padding: .7rem .85rem;
+  border-radius: .7rem;
+  font-size: .72rem;
+  line-height: 1.65;
+}
+.ask-msg.bot { align-self: flex-start; border: 1px solid var(--border); background: white; }
+.ask-msg.user { align-self: flex-end; background: var(--green); color: white; }
+.ask-msg.error { border-left: 3px solid #a23c31; }
+.ask-msg p { margin: 0 0 .5rem; }
+.ask-msg p:last-child { margin-bottom: 0; }
+
+.ask-links { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+.ask-links a {
+  padding: .4rem .65rem;
+  border: 1px solid var(--green);
+  border-radius: 2rem;
+  background: white;
+  color: var(--green);
+  font-size: .62rem;
+  font-weight: 800;
+}
+.ask-links a:hover { background: var(--green-soft); }
+
+.ask-products { display: flex; gap: .6rem; overflow-x: auto; margin-top: .6rem; padding-bottom: .3rem; }
+.ask-products .product-card { flex: 0 0 9.5rem; width: 9.5rem; }
+.ask-products .product-copy { padding: .6rem; }
+.ask-products .product-copy h3 { font-size: .72rem; }
+
+.ask-starters { display: flex; flex-wrap: wrap; gap: .4rem; }
+.ask-starters button {
+  padding: .45rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  background: white;
+  color: var(--green);
+  font-size: .63rem;
+  font-weight: 700;
+}
+.ask-starters button:hover { border-color: var(--green); background: var(--green-soft); }
+
+.ask-retry { margin-top: .5rem; padding: .4rem .7rem; border: 1px solid #a23c31; border-radius: .35rem; background: white; color: #a23c31; font-size: .62rem; font-weight: 800; }
+
+.ask-cart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  padding: .55rem .9rem;
+  border-top: 1px solid var(--border);
+  background: var(--green-soft);
+  font-size: .64rem;
+}
+.ask-cart a { color: var(--green); font-weight: 800; white-space: nowrap; }
+
+.ask-disclosure {
+  padding: .5rem .9rem;
+  border-top: 1px solid var(--border);
+  background: white;
+  color: var(--muted);
+  font-size: .55rem;
+  line-height: 1.5;
+}
+
+.ask-composer { display: flex; gap: .5rem; padding: .7rem .9rem; border-top: 1px solid var(--border); background: white; }
+.ask-composer input {
+  flex: 1;
+  min-width: 0;
+  padding: .7rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: .4rem;
+  font: inherit;
+  font-size: .72rem;
+}
+.ask-composer input:focus-visible { border-color: var(--green); }
+.ask-composer button {
+  padding: 0 1rem;
+  border: 0;
+  border-radius: .4rem;
+  background: var(--green);
+  color: white;
+  font-size: .7rem;
+  font-weight: 800;
+}
+.ask-composer button:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (max-width: 600px) {
+  /* Above the fixed mobile tab bar (4rem) — same lift as the toast queue. */
+  .ask-launcher, .ask-peek { bottom: 4.75rem; }
+  .ask-panel, .ask-panel.expanded {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    transition: none;
+  }
+  .ask-msg { max-width: 96%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-panel { transition: none; }
+}

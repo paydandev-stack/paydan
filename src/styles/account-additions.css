@@ -1,0 +1,513 @@
+/* Account navigation supports links as well as buttons. */
+.account-shell > aside a {
+  padding: 0.8rem 1rem;
+  border-radius: 0.4rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.account-shell > aside a.active {
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 800;
+}
+.account-shell > aside a:hover {
+  color: var(--green);
+}
+.account-shell > aside button {
+  color: var(--muted);
+}
+.account-shell > aside button:hover {
+  color: var(--ink);
+}
+.account-wrap {
+  padding-block: 2.5rem 5rem;
+}
+.account-shell section h1 {
+  margin: 0 0 0.5rem;
+  font: 500 clamp(2.2rem, 4vw, 3.4rem)/1.05 var(--serif);
+  letter-spacing: -0.02em;
+}
+.account-gate {
+  padding: 3rem;
+  max-width: 34rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.9rem;
+}
+.account-gate h1 {
+  margin-bottom: 0.6rem;
+}
+.account-gate p {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.8;
+}
+.account-gate button {
+  margin: 1rem 0.8rem 1rem 0;
+  padding: 0.85rem 1.2rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: var(--green);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.account-gate a {
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.account-orders {
+  margin-top: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.account-order-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+}
+.account-order-status a {
+  color: var(--green);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+.account-actions a {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.account-actions a:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.account-items {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.account-group {
+  padding: 0.9rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+.account-group > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.account-group small {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.address-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+.address-card {
+  padding: 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: white;
+}
+.address-card.default {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.address-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.address-card p {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.8;
+}
+.address-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.address-actions button {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: white;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.request-detail {
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.8rem;
+}
+.request-detail div {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+.request-detail span {
+  color: var(--muted);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.request-detail strong {
+  font-size: 0.76rem;
+}
+.quote-card {
+  padding: 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+.quote-lines div {
+  padding: 0.5rem 0;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.7rem;
+}
+.quote-card .account-actions {
+  margin-top: 1rem;
+}
+.quote-card .account-actions button.primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
+  font-weight: 800;
+}
+
+/* Sign in / register cards. */
+.auth-page {
+  padding-block: 4rem 6rem;
+  display: grid;
+  place-items: center;
+}
+.auth-card {
+  width: min(100%, 28rem);
+  padding: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: white;
+  box-shadow: var(--shadow-card);
+}
+.auth-card h1 {
+  margin: 0.5rem 0 0.8rem;
+  font: 500 clamp(2.2rem, 4vw, 3rem)/1 var(--serif);
+  letter-spacing: -0.02em;
+}
+.auth-intro {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.auth-card input {
+  min-height: 2.9rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: white;
+}
+.auth-card button.primary {
+  padding: 0.9rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: var(--green);
+  color: white;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+.auth-links {
+  margin-top: 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.auth-links a {
+  color: var(--green);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.auth-fineprint {
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+/* Profile details and account security. */
+.profile-page {
+  max-width: 68rem;
+}
+.profile-hero {
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid #cfe2d4;
+  border-radius: 0.9rem;
+  background: linear-gradient(135deg, var(--green-soft), #f8fbf8);
+}
+.profile-avatar {
+  flex: 0 0 4rem;
+  width: 4rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green-deep);
+  color: white;
+  font: 600 1.15rem var(--serif);
+  letter-spacing: 0.04em;
+}
+.profile-hero .kicker {
+  margin-bottom: 0.35rem;
+}
+.account-shell .profile-hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+.profile-hero p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.65;
+}
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+}
+.profile-card {
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: white;
+  box-shadow: 0 10px 30px rgba(17, 55, 29, 0.04);
+}
+.profile-card-heading {
+  margin-bottom: 1.4rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.profile-card-heading > div > span {
+  color: var(--green);
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+.profile-card .profile-card-heading h2 {
+  margin: 0.35rem 0 0;
+  font: 500 1.7rem/1.1 var(--serif);
+}
+.profile-card-heading > p {
+  margin: 0.65rem 0 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.6;
+}
+.profile-details-card .form-grid label small {
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.profile-details-card input[readonly] {
+  background: var(--surface);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.profile-form-footer {
+  margin-top: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.profile-form-footer button {
+  padding: 0.8rem 1.15rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: var(--green);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+.profile-form-footer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.profile-form-status {
+  min-height: 1rem;
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+.profile-form-status .error,
+.profile-inline-error {
+  color: #a23c31;
+}
+.profile-form-status .success {
+  color: var(--green);
+  font-weight: 700;
+}
+.security-options {
+  display: flex;
+  flex-direction: column;
+}
+.security-option {
+  padding: 1rem 0;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.security-option:last-child {
+  border-bottom: 0;
+}
+.security-option-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.55rem;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+.security-option-icon.google {
+  background: #eef3ff;
+  color: #2f63d8;
+  font-size: 0.9rem;
+}
+.security-option-copy h3 {
+  margin: 0;
+  font-size: 0.72rem;
+}
+.security-option-copy p {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.6rem;
+  line-height: 1.55;
+}
+.security-option-copy .profile-inline-error {
+  margin-top: 0.4rem;
+}
+.security-action {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: white;
+  color: var(--ink);
+  font-size: 0.58rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.security-action:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.security-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.security-status {
+  padding: 0.35rem 0.55rem;
+  border-radius: 2rem;
+  font-size: 0.54rem;
+  font-weight: 800;
+}
+.security-status.connected {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.security-status.checking {
+  background: var(--surface);
+  color: var(--muted);
+}
+.profile-security-note {
+  margin: 1.25rem 0 0;
+  padding: 0.8rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.58rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 1100px) {
+  .profile-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .address-grid,
+  .request-detail {
+    grid-template-columns: 1fr 1fr;
+  }
+  .auth-card {
+    padding: 1.6rem;
+  }
+  .profile-hero {
+    align-items: flex-start;
+    padding: 1.2rem;
+  }
+  .profile-avatar {
+    flex-basis: 3.2rem;
+    width: 3.2rem;
+    height: 3.2rem;
+  }
+  .profile-card {
+    padding: 1.2rem;
+  }
+  .profile-form-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .profile-form-footer button {
+    width: 100%;
+  }
+  .security-option {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+  .security-option > .security-action,
+  .security-option > .security-status {
+    grid-column: 2;
+    width: fit-content;
+  }
+}

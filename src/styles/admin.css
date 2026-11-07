@@ -1,0 +1,165 @@
+.admin-sidebar {
+  min-height: 100vh;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  background: var(--green-deep);
+  color: white;
+}
+.admin-sidebar img {
+  width: 5rem;
+  height: 4.4rem;
+  object-fit: contain;
+}
+.admin-sidebar small {
+  margin: 1rem 0 0.5rem;
+  color: #87ad96;
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+}
+.admin-sidebar button {
+  padding: 0.7rem 0.8rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: #bfd1c5;
+  text-align: left;
+  font-size: 0.68rem;
+}
+.admin-sidebar button.active {
+  background: var(--green);
+  color: white;
+  font-weight: 800;
+}
+.admin-content {
+  padding: 2rem;
+  overflow: hidden;
+}
+.admin-content > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.admin-content header span {
+  color: var(--green);
+  font-size: 0.6rem;
+  font-weight: 800;
+}
+.admin-content header h1 {
+  margin: 0.35rem 0;
+  font: 500 2.4rem var(--serif);
+}
+.admin-content header button {
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: var(--green);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+.admin-kpis {
+  margin: 2rem 0;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.6rem;
+}
+.admin-kpis article {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: white;
+}
+.admin-kpis span,
+.admin-kpis small {
+  color: var(--muted);
+  font-size: 0.55rem;
+}
+.admin-kpis strong {
+  font: 600 1.5rem var(--serif);
+}
+.admin-grid {
+  display: grid;
+  grid-template-columns: 1fr 16rem;
+  gap: 1rem;
+}
+.admin-grid > section,
+.admin-grid > aside {
+  padding: 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: white;
+}
+.admin-grid h2 {
+  margin-top: 0;
+  font: 500 1.35rem var(--serif);
+}
+.admin-section-title {
+  display: flex;
+  justify-content: space-between;
+}
+.admin-section-title button {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--green);
+  border-radius: 0.3rem;
+  background: white;
+  color: var(--green);
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr 0.7fr 1.2fr 0.8fr;
+  gap: 0.5rem;
+  padding: 0.7rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.6rem;
+}
+.table-head {
+  color: var(--muted);
+  font-weight: 800;
+}
+.status {
+  width: fit-content;
+  padding: 0.2rem 0.4rem;
+  border-radius: 1rem;
+  background: var(--green-soft);
+  color: var(--green);
+}
+.queue-item {
+  padding: 0.85rem 0;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.62rem;
+}
+.route-directory {
+  padding-bottom: 7rem;
+}
+
+/* Status tone variants (shared by storefront tracking and admin). */
+.status.green {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.status.orange {
+  background: var(--orange-soft);
+  color: #925409;
+}
+.status.red {
+  background: #fdeaea;
+  color: #a23c31;
+}
+.status.blue {
+  background: #e8f0ff;
+  color: #2457a7;
+}
+.status.neutral {
+  background: var(--surface);
+  color: var(--muted);
+}

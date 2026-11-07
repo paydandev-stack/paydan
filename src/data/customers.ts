@@ -1,0 +1,123 @@
+import "server-only";
+import type { Address, Customer } from "@/lib/types";
+
+export const customers: Customer[] = [
+  {
+    id: "c-1",
+    name: "Ada Okafor",
+    email: "ada.okafor@example.com",
+    phone: "+234 801 234 5678",
+    city: "Ikeja",
+    state: "Lagos",
+    joinedAt: "2025-11-03T09:00:00Z",
+    segments: ["Repeat buyer", "Sourcing customer"],
+    notes: "Prefers delivery after 5pm on weekdays.",
+  },
+  {
+    id: "c-2",
+    name: "Chidi Bello",
+    email: "chidi.bello@example.com",
+    phone: "+234 802 345 6789",
+    city: "Lekki",
+    state: "Lagos",
+    joinedAt: "2026-01-14T09:00:00Z",
+    segments: ["Repeat buyer"],
+    notes: "",
+  },
+  {
+    id: "c-3",
+    name: "Tomi Adeyemi",
+    email: "tomi.adeyemi@example.com",
+    phone: "+234 803 456 7890",
+    city: "Wuse",
+    state: "FCT",
+    joinedAt: "2026-03-22T09:00:00Z",
+    segments: ["New"],
+    notes: "",
+  },
+  {
+    id: "c-4",
+    name: "Kemi Yusuf",
+    email: "kemi.yusuf@example.com",
+    phone: "+234 804 567 8901",
+    city: "Port Harcourt",
+    state: "Rivers",
+    joinedAt: "2025-12-09T09:00:00Z",
+    segments: ["Repeat buyer", "High value"],
+    notes: "",
+  },
+  {
+    id: "c-5",
+    name: "Musa Danjuma",
+    email: "musa.danjuma@example.com",
+    phone: "+234 805 678 9012",
+    city: "Kano",
+    state: "Kano",
+    joinedAt: "2026-02-17T09:00:00Z",
+    segments: ["Bulk buyer"],
+    notes: "Buys bulk food items for a small catering business.",
+  },
+  {
+    id: "c-6",
+    name: "Fatima Sani",
+    email: "fatima.sani@example.com",
+    phone: "+234 806 789 0123",
+    city: "Abuja",
+    state: "FCT",
+    joinedAt: "2026-06-05T09:00:00Z",
+    segments: ["New"],
+    notes: "",
+  },
+  {
+    id: "c-7",
+    name: "Ifeanyi Eze",
+    email: "ifeanyi.eze@example.com",
+    phone: "+234 807 890 1234",
+    city: "Enugu",
+    state: "Enugu",
+    joinedAt: "2026-04-30T09:00:00Z",
+    segments: ["Repeat buyer"],
+    notes: "",
+  },
+  {
+    id: "c-8",
+    name: "Zainab Lawal",
+    email: "zainab.lawal@example.com",
+    phone: "+234 808 901 2345",
+    city: "Ibadan",
+    state: "Oyo",
+    joinedAt: "2026-07-11T09:00:00Z",
+    segments: ["Corporate"],
+    notes: "Orders for a 12-person office on a monthly cycle.",
+  },
+];
+
+/** Demo delivery addresses for the signed-in customer (Ada Okafor). */
+export const seedAddresses: Address[] = [
+  {
+    id: "a-1",
+    label: "Home",
+    recipient: "Ada Okafor",
+    phone: "+234 801 234 5678",
+    street: "12 Opebi Road",
+    landmark: "Opposite Opebi Market",
+    city: "Ikeja",
+    state: "Lagos",
+    isDefault: true,
+  },
+  {
+    id: "a-2",
+    label: "Office",
+    recipient: "Ada Okafor",
+    phone: "+234 801 234 5678",
+    street: "5 Allen Avenue, Suite 3",
+    landmark: "Near Allen Roundabout",
+    city: "Ikeja",
+    state: "Lagos",
+    isDefault: false,
+  },
+];
+
+export function customerById(id: string): Customer | undefined {
+  return customers.find((customer) => customer.id === id);
+}

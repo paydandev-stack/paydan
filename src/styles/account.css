@@ -1,0 +1,18 @@
+.account-shell > aside { display: flex; flex-direction: column; gap: .25rem; }
+.account-shell > aside > strong { padding: 1rem; }
+.account-shell > aside button { padding: .8rem 1rem; border: 0; border-radius: .4rem; background: transparent; text-align: left; color: var(--muted); font-size: .7rem; }
+.account-shell > aside button.active { background: var(--green-soft); color: var(--green); font-weight: 800; }
+.account-stats { margin: 2rem 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
+.account-stats article { padding: 1.2rem; display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--border); border-radius: .6rem; }
+.account-stats span, .account-stats small { color: var(--muted); font-size: .62rem; }
+.account-stats strong { font: 500 2.2rem var(--serif); }
+.account-shell section > h2 { margin-top: 2rem; font: 500 1.8rem var(--serif); }
+.account-order { padding: 1.2rem; border: 1px solid var(--border); border-radius: .6rem; }
+.account-order > div { display: flex; justify-content: space-between; }
+.account-order > div span { font-size: .7rem; }
+.account-order > div strong { color: var(--green); font-size: .65rem; }
+.account-order p { color: var(--muted); font-size: .68rem; }
+.account-order a { color: var(--green); font-size: .68rem; font-weight: 800; }
+.account-actions { display: flex; gap: .5rem; }
+.account-actions button { padding: .7rem .9rem; border: 1px solid var(--border); border-radius: .4rem; background: white; font-size: .65rem; }
+.admin-page { min-height: 100vh; display: grid; grid-template-columns: 15rem 1fr; background: #f4f6f4; }

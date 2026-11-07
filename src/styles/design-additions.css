@@ -1,0 +1,33 @@
+/* Specimen layouts for the /design-system reference page. Shares the token
+   vocabulary from tokens.css; nothing here overrides ported styles. */
+
+.ds-sections { display: flex; flex-direction: column; gap: 2.5rem; }
+.ds-section h2 { margin: 0 0 .5rem; font: 500 1.7rem var(--serif); }
+.ds-section > p { max-width: 46rem; margin: 0 0 1.1rem; color: var(--muted); font-size: .75rem; line-height: 1.8; }
+.ds-demo { padding: 1.5rem; border: 1px solid var(--border); border-radius: .8rem; background: var(--surface); }
+.ds-demo.plain { background: white; }
+.ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; }
+.ds-stack { display: flex; flex-direction: column; gap: .9rem; }
+.ds-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+
+.ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .7rem; }
+.ds-swatch { overflow: hidden; border: 1px solid var(--border); border-radius: .5rem; background: white; }
+.ds-swatch i { display: block; height: 4rem; }
+.ds-swatch div { padding: .5rem .6rem; display: flex; flex-direction: column; gap: .15rem; }
+.ds-swatch strong { font-size: .66rem; }
+.ds-swatch code { color: var(--muted); font-size: .6rem; }
+
+.ds-type-sample { display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem; padding: .7rem 0; border-bottom: 1px solid var(--border); }
+.ds-type-sample:last-child { border-bottom: 0; }
+.ds-type-sample span { flex: 0 0 auto; color: var(--muted); font-size: .6rem; }
+
+.ds-radius { display: flex; flex-wrap: wrap; gap: .8rem; }
+.ds-radius div { width: 7rem; height: 4rem; display: grid; place-items: center; border: 1px solid var(--border); background: white; color: var(--muted); font-size: .6rem; }
+.ds-shadow div { padding: 1.1rem; border-radius: .6rem; background: white; color: var(--muted); font-size: .65rem; }
+.ds-shadow div + div { margin-top: .9rem; }
+
+.ds-table-demo { overflow: hidden; border: 1px solid var(--border); border-radius: .6rem; background: white; }
+
+@media (max-width: 700px) {
+  .ds-grid-2 { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: paydan
+      POSTGRES_USER: paydan
+      POSTGRES_PASSWORD: paydan_local_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paydan -d paydan"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: pgsty/silo:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3000
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: pgsty/silo:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        set -eu;
+        mc alias set local http://minio:9000 minioadmin minioadmin123;
+        mc mb --ignore-existing local/paydan-media;
+        mc anonymous set none local/paydan-media;
+        echo 'MinIO bucket ready'
+    restart: "no"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: paydan-local-app:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    env_file:
+      - ${PAYDAN_ENV_FILE:-.env.docker}
+    command: ["sh", "-c", "npm run db:bootstrap:local && npm start"]
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/store').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+    restart: unless-stopped
+
+  mail-worker:
+    image: paydan-local-app:dev
+    depends_on:
+      app:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    env_file:
+      - ${PAYDAN_ENV_FILE:-.env.docker}
+    command:
+      ["sh", "-c", "while true; do npm run worker:mail || true; sleep 60; done"]
+    restart: unless-stopped
+
+  payment-worker:
+    image: paydan-local-app:dev
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - ${PAYDAN_ENV_FILE:-.env.docker}
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do npm run worker:payments || true; sleep 300; done",
+      ]
+    profiles: ["payments"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  miniodata:
