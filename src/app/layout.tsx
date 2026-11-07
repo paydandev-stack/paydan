@@ -5,7 +5,7 @@ import { ToastViewport } from "@/components/toast-viewport";
 import { SubtleMotion } from "@/components/subtle-motion";
 import { AskPaydan } from "@/components/assistant/ask-paydan";
 import "./globals.css";
-import { snapshot } from "@/server/snapshot";
+import { publicCatalogSnapshot } from "@/server/public-catalog";
 
 const manrope = localFont({
   src: "./fonts/manrope-latin.woff2",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const initialState = await snapshot(null);
+  const initialState = await publicCatalogSnapshot();
   return (
     <html lang="en-NG" className={`${manrope.variable} ${newsreader.variable}`}>
       <body>

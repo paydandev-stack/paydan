@@ -34,7 +34,7 @@ import type {
   Voucher,
 } from "./types";
 import { emptyState } from "./empty-state";
-import { api } from "./api-client";
+import { api, publicApi } from "./api-client";
 import { rememberIntent } from "./intent";
 type PlaceOrderInput = {
   customerName: string;
@@ -206,7 +206,13 @@ export function DemoProvider({
   const refresh = useCallback(async () => {
     const version = ++requestVersion.current;
     try {
-      const next = await api<DemoState>("/api/store?scope=" + scopeRef.current);
+      const response = await api<DemoState | { guest: true }>(
+        "/api/store?scope=" + scopeRef.current,
+      );
+      const next =
+        "guest" in response
+          ? await publicApi<DemoState>("/api/catalog")
+          : response;
       if (version === requestVersion.current) {
         setState((current) => ({ ...next, toasts: current.toasts }));
         setError("");

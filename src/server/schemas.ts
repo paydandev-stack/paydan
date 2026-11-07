@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isCatalogCdnUrl } from "./media-delivery";
 export const id = z.string().min(1).max(150);
 export const text = z.string().trim().max(5000);
 export const short = z.string().trim().min(1).max(200);
@@ -20,7 +21,8 @@ export const image = z
   .refine(
     (s) =>
       s.startsWith("/api/media/") ||
-      s.startsWith("https://images.unsplash.com/"),
+      s.startsWith("https://images.unsplash.com/") ||
+      isCatalogCdnUrl(s),
     "Use an uploaded image.",
   );
 export const address = z.object({

@@ -1,6 +1,6 @@
 # PAYDAN setup and operations
 
-Updated 5 November 2026. Application: `paydan-next`. The implementation uses PostgreSQL, private AWS S3, Google-only OAuth, email/password authentication, and Paystack. The AI provider remains undecided. This document describes implemented code and the external setup still required; it is not a claim that live services have been commissioned.
+Updated 7 November 2026. Application: `paydan-next`. The implementation uses Neon PostgreSQL, private AWS S3 with optional CloudFront catalog delivery, Google-only OAuth, email/password authentication, and Paystack. The AI provider remains undecided. This document describes implemented code and the external setup still required; it is not a claim that every live service has been commissioned.
 
 ## Local setup
 
@@ -15,11 +15,12 @@ Populate `.env.local` privately; never commit it or send secret keys in chat. No
 
 | Service        | Required configuration                                                                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------- |
-| PostgreSQL     | `DATABASE_URL`, with the database host's verified TLS configuration                                         |
+| PostgreSQL     | Pooled `DATABASE_URL`; direct `DATABASE_URL_UNPOOLED` for migrations; verified TLS settings                 |
 | Authentication | `BETTER_AUTH_URL` (exact origin, HTTPS in production), `BETTER_AUTH_SECRET` (at least 32 random characters) |
 | Google         | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                  |
 | Paystack       | `PAYSTACK_SECRET_KEY`; use a test key for staging                                                           |
 | S3             | `AWS_REGION`, `S3_BUCKET`; prefer an IAM role, or local AWS SDK credentials                                 |
+| Media CDN      | `MEDIA_CDN_URL`, the HTTPS CloudFront/custom-domain base URL for the private S3 origin                      |
 | Email          | `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, and credentials when required by the SMTP host                       |
 | AI, optional   | `AI_CHAT_COMPLETIONS_URL`, `AI_API_KEY`, `AI_MODEL`                                                         |
 
@@ -30,7 +31,7 @@ npm run db:migrate
 npm run dev
 ```
 
-The migration runner applies versioned commerce SQL and Better Auth's database schema. Back up an existing database before migrating; run migrations as one deployment job. Use a separate migration credential if the production runtime has reduced database permissions. The application connection pool allows ten connections per process; size the database pool for the number of replicas.
+The migration runner applies versioned commerce SQL and Better Auth's database schema. It automatically prefers `DATABASE_URL_UNPOOLED` when supplied so DDL and advisory locks bypass PgBouncer; application requests continue using the pooled `DATABASE_URL`. Back up an existing database before migrating and run migrations as one deployment job. Use a separate migration credential if the production runtime has reduced database permissions. The application connection pool allows ten connections per process; size the database pool for the number of replicas.
 
 With no database configured, the application provides a sanitized public catalogue preview. Authentication, purchases and private account data are unavailable. This preview never seeds a production database.
 
@@ -54,7 +55,7 @@ npm run admin:bootstrap -- verified-operator@example.com
 
 This is a privileged database operation, not a public registration option. In `/admin/settings/team`, a Super Admin can add staff, assign roles, and activate access after the account is verified. Invited/suspended records grant no access. Roles are checked server-side on every request. Protect Super Admin accounts and avoid suspending the last administrator.
 
-## Private S3 media
+## Private S3 and catalog CDN media
 
 Create a private bucket with Block Public Access enabled, encryption at rest and versioning. Grant the application IAM access to GetObject, PutObject and DeleteObject only in its own bucket/prefixes: `incoming/`, `catalog/`, `sourcing/`, `return/`. The application needs no public bucket policy. Configure CORS for your exact production/staging origins and local development origin; allow POST, GET, HEAD and the required content headers. A typical rule is:
 
@@ -72,7 +73,11 @@ Create a private bucket with Block Public Access enabled, encryption at rest and
 
 Remove localhost from the production bucket rule. Add a lifecycle expiry for abandoned objects under `incoming/`. Do not expire finalized private evidence without the business's approved retention policy.
 
-Uploads accept JPG/PNG/WebP up to 5 MiB. A two-minute signed POST fixes the size and MIME type. Finalization verifies actual bytes, decodes with a pixel limit, strips metadata, and writes a new immutable WebP key. Catalog media is publicly viewable through a short-lived signed URL. Sourcing/return evidence requires its owner or an authorized staff session before URL issuance. Anyone holding an issued URL can use it for its short lifetime; do not log or share private signed URLs.
+Create a CloudFront distribution with the S3 bucket as a regular origin and configure Origin Access Control (OAC). Keep S3 Block Public Access enabled and grant only the CloudFront distribution permission to read `catalog/*`. Point a stable custom hostname such as `media.example.com` to the distribution, issue its TLS certificate, and set that HTTPS base URL as `MEDIA_CDN_URL` in every Vercel environment. Redeploy after setting it because the hostname is also added to Next.js image configuration at build time. Do not expose `incoming/`, `sourcing/`, or `return/` through a public CloudFront behavior.
+
+Uploads accept JPG/PNG/WebP up to 5 MiB. A two-minute signed POST fixes the size and MIME type. Finalization verifies actual bytes, decodes with a pixel limit, strips metadata, and writes a new immutable WebP key. Catalog objects receive a one-year immutable cache policy and, when `MEDIA_CDN_URL` is configured, product records receive the CloudFront URL directly. Legacy `/api/media/{id}` catalog references redirect to CloudFront with shared-cache headers. Sourcing/return evidence continues to require its owner or an authorized staff session and receives a 60-second S3 URL with `private, no-store`. Anyone holding an issued private URL can use it for its short lifetime; do not log or share it.
+
+Anonymous product data is delivered separately from account state at `/api/catalog`. It contains price-free catalogue DTOs only and is eligible for short shared CDN caching. `/api/store`, authenticated prices, carts, orders, addresses, inventory operations, and private evidence remain `private, no-store`. Catalog mutations invalidate the server data-cache tag; the public CDN response also has a short TTL so external cache propagation is bounded.
 
 ## Catalogue, stock and sourcing
 
@@ -119,7 +124,7 @@ Replies can propose products, variants and quantities. A user must confirm each 
 
 ## Deployment and acceptance
 
-Run `npm test`, `npm run typecheck`, and `npm run build`. Serve with `npm start` behind HTTPS, using the exact configured origin. Restrict proxy body sizes and configure trusted proxy/IP handling for deployment. API responses containing account state are private/no-store. Never cache those responses at a CDN. Host the Node runtime with PostgreSQL/SMTP/AWS/Paystack egress and enough memory for Sharp image processing.
+Run `npm test`, `npm run typecheck`, and `npm run build`. On Vercel, deploy Functions to London (`lhr1`) to match the Neon and S3 `eu-west-2` resources. Serve behind HTTPS using the exact configured origin. Restrict proxy body sizes and configure trusted proxy/IP handling for deployment. API responses containing account state are private/no-store. Never cache those responses at a CDN. Host the Node runtime with PostgreSQL/SMTP/AWS/Paystack egress and enough memory for Sharp image processing.
 
 Run `npm run test:smoke` against a local preview at port 3107, or set `SMOKE_BASE_URL` to the intended test server. This checks public routes and anonymous API denial; it does not create users or payments.
 
@@ -131,4 +136,4 @@ For rollback, keep the prior application build and a pre-migration backup. Prefe
 
 ## Reference documentation
 
-Implementation references: [Better Auth](https://www.better-auth.com/docs/installation), [Paystack payment verification](https://paystack.com/docs/payments/verify-payments/), [Paystack webhooks](https://paystack.com/docs/payments/webhooks/), [AWS S3 presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html). Use the versions pinned in the lockfile when maintaining this application.
+Implementation references: [Better Auth](https://www.better-auth.com/docs/installation), [Paystack payment verification](https://paystack.com/docs/payments/verify-payments/), [Paystack webhooks](https://paystack.com/docs/payments/webhooks/), [AWS S3 presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html), and [CloudFront Origin Access Control](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html). Use the versions pinned in the lockfile when maintaining this application.

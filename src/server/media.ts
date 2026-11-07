@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { z } from "zod";
 import { database } from "./db";
 import { HttpError, requireRole, type Viewer } from "./http";
+import { catalogCdnUrl } from "./media-delivery";
 type Media = {
   id: string;
   owner_id: string;
@@ -84,7 +85,12 @@ export async function finalizeUpload(user: Viewer, id: string) {
   const media: Media = result.rows[0];
   if (!media) throw new HttpError(404, "Upload not found.");
   if (media.purpose === "catalog") requireRole(user, ["Catalog Manager"]);
-  if (media.status === "ready") return { url: `/api/media/${id}` };
+  if (media.status === "ready")
+    return {
+      url:
+        (media.purpose === "catalog" && catalogCdnUrl(media.object_key)) ||
+        `/api/media/${id}`,
+    };
   const { client, bucket } = config();
   const object = await client.send(
     new GetObjectCommand({ Bucket: bucket, Key: media.object_key }),
@@ -119,6 +125,11 @@ export async function finalizeUpload(user: Viewer, id: string) {
       Key: finalKey,
       Body: image,
       ContentType: "image/webp",
+      CacheControl:
+        media.purpose === "catalog"
+          ? "public, max-age=31536000, immutable"
+          : "private, no-store",
+      ContentDisposition: "inline",
       // AWS S3 supports SSE-S3 directly. Local MinIO is already isolated and
       // may not have a KMS configured, so do not request SSE through its endpoint.
       ...(process.env.S3_ENDPOINT
@@ -133,7 +144,11 @@ export async function finalizeUpload(user: Viewer, id: string) {
   await client.send(
     new DeleteObjectCommand({ Bucket: bucket, Key: media.object_key }),
   );
-  return { url: `/api/media/${id}` };
+  return {
+    url:
+      (media.purpose === "catalog" && catalogCdnUrl(finalKey)) ||
+      `/api/media/${id}`,
+  };
 }
 export async function readMedia(id: string, user: Viewer | null) {
   const result = await database().query(
@@ -144,8 +159,16 @@ export async function readMedia(id: string, user: Viewer | null) {
   if (!media) throw new HttpError(404, "Image not found.");
   if (media.purpose !== "catalog" && user?.id !== media.owner_id)
     requireRole(user, ["Procurement Manager", "Order Manager", "Support"]);
+  const cdnUrl =
+    media.purpose === "catalog" ? catalogCdnUrl(media.object_key) : null;
+  if (cdnUrl)
+    return {
+      url: cdnUrl,
+      cacheControl:
+        "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+    };
   const { publicClient, bucket } = config();
-  return getSignedUrl(
+  const url = await getSignedUrl(
     publicClient,
     new GetObjectCommand({
       Bucket: bucket,
@@ -156,4 +179,5 @@ export async function readMedia(id: string, user: Viewer | null) {
     }),
     { expiresIn: 60 },
   );
+  return { url, cacheControl: "private, no-store" };
 }

@@ -52,8 +52,9 @@ import { auth } from "../src/server/auth";
 import { viewer, requireRole, sameOrigin } from "../src/server/http";
 import { refundReturn, verifyRefund } from "../src/server/refunds";
 import { readMedia, beginUpload, finalizeUpload } from "../src/server/media";
+import { catalogCdnUrl, isCatalogCdnUrl } from "../src/server/media-delivery";
 import { chat } from "../src/server/assistant";
-import { checkout, kobo } from "../src/server/schemas";
+import { checkout, image, kobo } from "../src/server/schemas";
 import { safePath } from "../src/lib/intent";
 import type { Order, Product } from "../src/lib/types";
 import { getMigrations } from "better-auth/db/migration";
@@ -122,6 +123,7 @@ beforeAll(async () => {
   );
   vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
   vi.stubEnv("PAYSTACK_SECRET_KEY", "sk_test_isolated");
+  vi.stubEnv("MEDIA_CDN_URL", "https://media.paydan.test/assets");
   harness.db = new PGlite();
   const client = adapter(harness.db);
   harness.pool = {
@@ -633,6 +635,26 @@ describe("sourcing, returns, media and stock recovery", () => {
     await expect(
       command(alice, "addToCart", ["p1", "v1", 1], "restricted-cart"),
     ).rejects.toMatchObject({ status: 409 });
+  });
+  it("delivers public catalog media through the configured CDN only", async () => {
+    const url = catalogCdnUrl("catalog/image one.webp");
+    expect(url).toBe(
+      "https://media.paydan.test/assets/catalog/image%20one.webp",
+    );
+    expect(isCatalogCdnUrl(url!)).toBe(true);
+    expect(isCatalogCdnUrl("https://attacker.example/catalog/image.webp")).toBe(
+      false,
+    );
+    expect(catalogCdnUrl("return/private.webp")).toBeNull();
+    expect(image.parse(url)).toBe(url);
+
+    await database().query(
+      "INSERT INTO media(id,owner_id,object_key,purpose,mime,size,status) VALUES('catalog-image','admin','catalog/image one.webp','catalog','image/webp',100,'ready')",
+    );
+    await expect(readMedia("catalog-image", null)).resolves.toMatchObject({
+      url,
+      cacheControl: expect.stringContaining("s-maxage"),
+    });
   });
   it("checks private image ownership and rejects unsafe uploads before calling AWS", async () => {
     await database().query(

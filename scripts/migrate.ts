@@ -5,6 +5,10 @@ import { auth } from "../src/server/auth";
 import { database, transaction } from "../src/server/db";
 async function main() {
   loadEnvConfig(process.cwd());
+  // Long-running DDL and advisory locks should bypass PgBouncer when Neon (or
+  // another provider) supplies a direct administrative connection.
+  if (process.env.DATABASE_URL_UNPOOLED)
+    process.env.DATABASE_URL = process.env.DATABASE_URL_UNPOOLED;
   const db = database();
   await db.query(
     "CREATE TABLE IF NOT EXISTS schema_migration(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
