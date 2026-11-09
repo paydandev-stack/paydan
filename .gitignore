@@ -11,3 +11,6 @@ next-env.d.ts
 !.env.example
 !.env.docker.example
 client_secret_*.apps.googleusercontent.com.json
+client_secret_*.json
+*.pem
+*accessKeys.csv

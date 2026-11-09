@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { database, put, record, records, transaction } from "@/server/db";
 import {
@@ -10,6 +9,7 @@ import {
   sameOrigin,
   viewer,
 } from "@/server/http";
+import { enqueueMail } from "@/server/mail/queue";
 export async function GET(request: Request) {
   try {
     requireRole(await viewer(request.headers), ["Support"]);
@@ -43,10 +43,13 @@ export async function POST(request: Request) {
       ticket.reply = input.reply;
       ticket.status = "replied";
       await put(db, "support", input.id, ticket, ticket.customerId);
-      await db.query(
-        "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-        [randomUUID(), ticket.email, `PAYDAN: ${ticket.subject}`, input.reply],
-      );
+      await enqueueMail(db, {
+        eventKey: `support:${ticket.id}:reply:customer`,
+        eventType: "support.replied",
+        recipient: ticket.email,
+        template: "support.reply",
+        data: { subject: ticket.subject, reply: input.reply },
+      });
     });
     return json({ saved: true });
   } catch (error) {

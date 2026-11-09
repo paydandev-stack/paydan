@@ -57,6 +57,8 @@ export type Category = {
   description: string;
   image: string;
   order: number;
+  /** Archived departments remain editable in operations but disappear from customer surfaces. */
+  active?: boolean;
   restricted: boolean;
   subcategories: Subcategory[];
   /** Extra filters shown for this department, e.g. storage, size, skin type. */

@@ -210,6 +210,10 @@ export function SiteHeader() {
           ref={navRef}
         >
           <div className="wrap nav-inner">
+            <div className="mobile-drawer-head">
+              <strong>Browse PAYDAN</strong>
+              <button type="button" onClick={closeAll} aria-label="Close menu">×</button>
+            </div>
             <button
               type="button"
               className="departments"
@@ -281,6 +285,7 @@ export function SiteHeader() {
           ) : null}
         </div>
       </header>
+      {navOpen ? <button type="button" className="site-nav-backdrop" onClick={closeAll} aria-label="Close menu" /> : null}
     </>
   );
 }

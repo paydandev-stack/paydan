@@ -15,6 +15,8 @@ import { emptyState } from "@/lib/empty-state";
 import { put, record, records, transaction, type Queryable } from "./db";
 import { HttpError, requireRole, type Viewer } from "./http";
 import * as s from "./schemas";
+import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
+import { productRecordKind } from "./test-buyer";
 
 export async function command(
   user: Viewer,
@@ -65,17 +67,6 @@ async function required<T>(
 function own(owner: string | undefined, user: Viewer) {
   if (owner !== user.id) throw new HttpError(404, "Record not found.");
 }
-async function mail(
-  db: Queryable,
-  email: string,
-  subject: string,
-  body: string,
-) {
-  await db.query(
-    "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-    [randomUUID(), email, subject, body],
-  );
-}
 export async function account(db: Queryable, user: Viewer) {
   return {
     ...emptyState(),
@@ -101,11 +92,12 @@ async function saveAccount(db: Queryable, user: Viewer, a: DemoState) {
 }
 async function validLine(
   db: Queryable,
+  user: Viewer,
   pid: unknown,
   vid: unknown,
   qty: unknown,
 ): Promise<CartLine> {
-  const p = await required<Product>(db, "products", pid);
+  const p = await required<Product>(db, productRecordKind(user), pid);
   const variant = p.variants.find((v) => v.id === vid);
   const category = await record<{ restricted: boolean }>(
     db,
@@ -170,6 +162,7 @@ async function execute(
           : { productId: a, variantId: b, quantity: c ?? 1 };
       const line = await validLine(
         db,
+        user,
         input.productId,
         input.variantId,
         input.quantity,
@@ -205,7 +198,7 @@ async function execute(
         (l) => l.productId === a && l.variantId === b,
       );
       if (line) {
-        await validLine(db, a, b, line.quantity);
+        await validLine(db, user, a, b, line.quantity);
         if (index < 0) state.cart.push(line);
         else
           state.cart[index].quantity = s.quantity.parse(
@@ -214,7 +207,7 @@ async function execute(
         state.savedForLater = state.savedForLater.filter((l) => l !== line);
       }
     } else if (name === "toggleWishlist") {
-      const p = await required<Product>(db, "products", a);
+      const p = await required<Product>(db, productRecordKind(user), a);
       if (p.status !== "published" || p.restricted)
         throw new HttpError(404, "Product not found.");
       state.wishlist = state.wishlist.includes(p.id)
@@ -324,12 +317,20 @@ async function execute(
     const acc = await account(db, user);
     acc.lastSourcingReference = reference;
     await saveAccount(db, user, acc);
-    await mail(
-      db,
-      user.email,
-      "PAYDAN sourcing request received",
-      `Your request ${reference} is being reviewed. View updates in your dashboard.`,
-    );
+    await enqueueMail(db, {
+      eventKey: `sourcing:${requestId}:received:customer`,
+      eventType: "sourcing.received",
+      recipient: user.email,
+      template: "sourcing.received",
+      data: { reference, requestId },
+    });
+    await enqueueOperationsAlert(db, {
+      eventKey: `sourcing:${requestId}:received`,
+      eventType: "sourcing.received",
+      title: "New sourcing request",
+      message: `${user.name} submitted sourcing request ${reference}.`,
+      href: `/admin/sourcing-requests/${requestId}`,
+    });
     return reference;
   }
   if (name === "respondToQuote") {
@@ -402,6 +403,20 @@ async function execute(
       adminNote: "",
     };
     await put(db, "returns", id, result, user.id);
+    await enqueueMail(db, {
+      eventKey: `return:${id}:received:customer`,
+      eventType: "return.received",
+      recipient: user.email,
+      template: "return.received",
+      data: { reference: result.reference },
+    });
+    await enqueueOperationsAlert(db, {
+      eventKey: `return:${id}:received`,
+      eventType: "return.received",
+      title: "New return request",
+      message: `${user.name} submitted return ${result.reference} for order ${order.reference}.`,
+      href: "/admin/returns",
+    });
     return result;
   }
   if (name === "cancelOrder") {
@@ -554,12 +569,13 @@ async function execute(
     const id = prior?.id ?? randomUUID();
     await put(db, "team", id, { ...value, id });
     if (value.status === "invited")
-      await mail(
-        db,
-        value.email,
-        "You have been invited to PAYDAN operations",
-        `Create and verify an account at ${process.env.BETTER_AUTH_URL}/register. A super administrator must then activate your team access.`,
-      );
+      await enqueueMail(db, {
+        eventKey: `team:${id}:invite:${value.email}`,
+        eventType: "team.invited",
+        recipient: value.email,
+        template: "team.invite",
+        data: {},
+      });
   } else if (name === "updateSettings") {
     const patch = z
       .object({
@@ -626,12 +642,13 @@ async function execute(
         done: true,
       });
     await put(db, "orders", order.id, order, order.customerId);
-    await mail(
-      db,
-      order.customerEmail,
-      `PAYDAN order ${order.reference} updated`,
-      `Your order is ${order.fulfillmentStatus.replaceAll("_", " ")}. View your dashboard for details.`,
-    );
+    await enqueueMail(db, {
+      eventKey: `order:${order.id}:status:${order.fulfillmentStatus}:customer`,
+      eventType: "order.status_changed",
+      recipient: order.customerEmail,
+      template: "order.status",
+      data: { reference: order.reference, orderId: order.id, status: order.fulfillmentStatus },
+    });
   } else if (name === "updateVendorStage") {
     const order = await required<Order>(db, "orders", a);
     const group = order.vendorGroups.find((g) => g.id === b);
@@ -676,6 +693,15 @@ async function execute(
       throw new HttpError(409, "This return is already refunded.");
     Object.assign(value, patch);
     await put(db, "returns", value.id, value, value.customerId);
+    const returnOrder = await record<Order>(db, "orders", value.orderId);
+    if (returnOrder)
+      await enqueueMail(db, {
+        eventKey: `return:${value.id}:status:${value.status}:customer`,
+        eventType: "return.status_changed",
+        recipient: returnOrder.customerEmail,
+        template: "return.status",
+        data: { reference: value.reference, status: value.status },
+      });
   } else {
     const request = await required<SourcingRequest>(db, "sourcing", a);
     if (name === "saveQuote") {
@@ -702,12 +728,13 @@ async function execute(
       request.quote.status = "sent";
       request.quote.sentAt = new Date().toISOString();
       request.status = "awaiting_customer";
-      await mail(
-        db,
-        request.email,
-        "Your PAYDAN quotation is ready",
-        `Review request ${request.reference} in your dashboard before ${request.quote.validUntil}.`,
-      );
+      await enqueueMail(db, {
+        eventKey: `sourcing:${request.id}:quote:${request.quote.sentAt}:customer`,
+        eventType: "sourcing.quote_sent",
+        recipient: request.email,
+        template: "sourcing.quote",
+        data: { reference: request.reference, requestId: request.id, validUntil: request.quote.validUntil },
+      });
     }
     if (name === "updateSourcing" || name === "setSourcingStatus") {
       const patch = z

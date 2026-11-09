@@ -54,32 +54,38 @@ export function SiteFooter() {
           <a href="/contact">{state.settings.businessHours}</a>
         </div>
 
-        <div>
-          <h3>Departments</h3>
-          {departments.map((department) => (
-            <Link key={department.slug} href={`/category/${department.slug}`}>
-              {department.name}
-            </Link>
-          ))}
-        </div>
+        <details className="footer-links">
+          <summary>Departments <span aria-hidden="true">+</span></summary>
+          <div>
+            {departments.map((department) => (
+              <Link key={department.slug} href={`/category/${department.slug}`}>
+                {department.name}
+              </Link>
+            ))}
+          </div>
+        </details>
 
-        <div>
-          <h3>Customer care</h3>
-          {careLinks.map((link) => (
-            <Link key={link.href} href={link.href}>
-              {link.label}
-            </Link>
-          ))}
-        </div>
+        <details className="footer-links">
+          <summary>Customer care <span aria-hidden="true">+</span></summary>
+          <div>
+            {careLinks.map((link) => (
+              <Link key={link.href} href={link.href}>
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </details>
 
-        <div>
-          <h3>Paydan</h3>
-          {companyLinks.map((link) => (
-            <Link key={link.href} href={link.href}>
-              {link.label}
-            </Link>
-          ))}
-        </div>
+        <details className="footer-links">
+          <summary>Paydan <span aria-hidden="true">+</span></summary>
+          <div>
+            {companyLinks.map((link) => (
+              <Link key={link.href} href={link.href}>
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </details>
       </div>
 
       <div className="wrap footer-bottom">

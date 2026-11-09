@@ -93,6 +93,8 @@ Answers use current published catalogue and approved knowledge. Product suggesti
 
 Ask whether a budget includes delivery. Offer alternatives or a sourcing request when appropriate. Do not invent products, stock, prices, delivery promises, or policy terms. Never collect card details or passwords through chat. AI outages fall back to normal search and support.
 
+Production AI uses two ordered model-vendor slots through Vercel AI Gateway: an evaluated primary and a different secondary fallback. Local development and Vercel Preview may use a separate direct Groq free-plan profile with synthetic data; the application must reject that test profile in Production. After all providers permitted by the active profile fail, use the deterministic normal-search/support experience. Keep Gateway and Groq credentials server-only, apply bounded failover without replaying mutations, and record sanitized provider/model telemetry.
+
 ## 7. Remaining commerce and operations
 
 Complete cart editing, saved items, addresses, checkout, order confirmation, supplier-group tracking, sourcing/quotation acceptance, returns, and support. Show payment and fulfilment separately. Explain split deliveries in customer language.

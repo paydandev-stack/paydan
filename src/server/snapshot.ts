@@ -4,6 +4,7 @@ import { toPublicProduct, toMemberProduct } from "@/lib/catalog-dto";
 import type { DemoState, Order, Product, SourcingRequest } from "@/lib/types";
 import { database, records, record } from "./db";
 import type { Viewer } from "./http";
+import { isTestBuyer } from "./test-buyer";
 
 export function customerOrder(order: Order) {
   return {
@@ -68,6 +69,11 @@ export async function snapshot(
     // Each entity is stored separately; customer ownership never comes from the request body.
     (state[kind] as unknown[]) = await records(db, kind);
   }
+  const testBuyer = isTestBuyer(user);
+  if (testBuyer && user) {
+    state.products = await records(db, "testProducts", user.id);
+    state.shippingZones = await records(db, "testShippingZones", user.id);
+  }
   state.settings = {
     ...state.settings,
     ...(await record(db, "settings", "store")),
@@ -80,7 +86,7 @@ export async function snapshot(
         .map((category) => category.slug),
     );
     state.categories = state.categories.filter(
-      (category) => !category.restricted,
+      (category) => category.active !== false && !category.restricted,
     );
     state.products = state.products
       .filter(
@@ -113,13 +119,17 @@ export async function snapshot(
       if (account?.[key] !== undefined)
         Object.assign(state, { [key]: account[key] });
     }
-    state.orders = (await records<Order>(db, "orders", user.id)).map(
+    state.orders = (await records<Order>(db, testBuyer ? "testOrders" : "orders", user.id)).map(
       customerOrder,
     ) as unknown as Order[];
     state.sourcing = (
-      await records<SourcingRequest>(db, "sourcing", user.id)
+      await records<SourcingRequest>(db, testBuyer ? "testSourcing" : "sourcing", user.id)
     ).map(customerRequest) as SourcingRequest[];
-    state.returns = await records(db, "returns", user.id);
+    state.returns = await records(
+      db,
+      testBuyer ? "testReturns" : "returns",
+      user.id,
+    );
     const profile = await record<{
       phone?: string;
       city?: string;

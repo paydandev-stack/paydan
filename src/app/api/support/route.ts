@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { put, transaction } from "@/server/db";
+import { enqueueMail, enqueueOperationsAlert } from "@/server/mail/queue";
 import {
   body,
   failure,
@@ -38,15 +39,20 @@ export async function POST(request: Request) {
         },
         user.id,
       );
-      await db.query(
-        "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-        [
-          randomUUID(),
-          user.email,
-          `PAYDAN support request ${id.slice(0, 8)}`,
-          "Your message has been received. Our team will reply to your verified email.",
-        ],
-      );
+      await enqueueMail(db, {
+        eventKey: `support:${id}:received:customer`,
+        eventType: "support.received",
+        recipient: user.email,
+        template: "support.received",
+        data: { reference: id.slice(0, 8) },
+      });
+      await enqueueOperationsAlert(db, {
+        eventKey: `support:${id}:received`,
+        eventType: "support.received",
+        title: "New support request",
+        message: `${user.name} submitted “${input.subject}”.`,
+        href: "/admin/support",
+      });
     });
     return json({ reference: id.slice(0, 8) });
   } catch (error) {

@@ -2,7 +2,8 @@
 
 import Image from "@/components/safe-image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { canAccessAdmin } from "@/lib/admin-access";
 import { useDemo } from "@/lib/store";
 
@@ -141,12 +142,18 @@ export function AdminSidebar() {
 export function AdminMobileNav() {
   const { state, actions } = useDemo();
   const pathname = usePathname();
-  const router = useRouter();
   const session = state.adminSession;
   const active = activeHref(pathname);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [pathname]);
 
   return (
-    <nav className="admin-mobile-nav" aria-label="Admin sections">
+    <>
+    <button type="button" className="admin-mobile-trigger" onClick={() => setOpen(true)} aria-expanded={open}>
+      <span><small>PAYDAN operations</small><strong>{flatNav.find((item) => item.href === active)?.label || "Menu"}</strong></span><b aria-hidden="true">☰</b>
+    </button>
+    <nav className={`admin-mobile-nav${open ? " open" : ""}`} aria-label="Admin sections">
+      <header><strong>Operations menu</strong><button type="button" onClick={() => setOpen(false)} aria-label="Close operations menu">×</button></header>
       {flatNav
         .filter((item) => session && canAccessAdmin(session.role, item.href))
         .map((item) => (
@@ -172,5 +179,7 @@ export function AdminMobileNav() {
         <Link href="/admin/login">Sign in</Link>
       )}
     </nav>
+    {open ? <button type="button" className="admin-mobile-backdrop" onClick={() => setOpen(false)} aria-label="Close operations menu" /> : null}
+    </>
   );
 }

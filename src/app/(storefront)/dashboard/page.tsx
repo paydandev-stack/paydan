@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(
     null,
   );
+  const [departmentMenuOpen, setDepartmentMenuOpen] = useState(false);
   const productFeedRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function Dashboard() {
     : products.slice(0, 12);
   function chooseDepartment(slug: string | null) {
     setSelectedDepartment(slug);
+    setDepartmentMenuOpen(false);
     window.requestAnimationFrame(() => {
       const feed = productFeedRef.current;
       if (!feed) return;
@@ -146,20 +148,25 @@ export default function Dashboard() {
         </Link>
       </nav>
       <section className="dashboard-shop" aria-labelledby="department-heading">
-        <label className="dashboard-department-select">
+        <div className="dashboard-department-select">
           <span>Find your department</span>
-          <select
-            value={selectedDepartment ?? ""}
-            onChange={(event) => chooseDepartment(event.target.value || null)}
-          >
-            <option value="">For you</option>
+          <button type="button" onClick={() => setDepartmentMenuOpen(true)} aria-expanded={departmentMenuOpen}>
+            {activeDepartment?.name ?? "For you"} <b aria-hidden="true">⌄</b>
+          </button>
+        </div>
+        <div className={departmentMenuOpen ? "dashboard-department-sheet open" : "dashboard-department-sheet"} role="dialog" aria-modal="true" aria-label="Choose a department">
+          <header><strong>Choose a department</strong><button type="button" onClick={() => setDepartmentMenuOpen(false)} aria-label="Close departments">×</button></header>
+          <nav>
+            <button type="button" className={!activeDepartment ? "active" : undefined} onClick={() => chooseDepartment(null)}>For you <span>Personal picks</span></button>
             {departments.map((department) => (
-              <option key={department.slug} value={department.slug}>
+              <button type="button" key={department.slug} className={activeDepartment?.slug === department.slug ? "active" : undefined} onClick={() => chooseDepartment(department.slug)}>
                 {department.name}
-              </option>
+                <span>{products.filter((product) => product.categorySlug === department.slug).length} products</span>
+              </button>
             ))}
-          </select>
-        </label>
+          </nav>
+        </div>
+        {departmentMenuOpen ? <button type="button" className="sheet-backdrop" aria-label="Close departments" onClick={() => setDepartmentMenuOpen(false)} /> : null}
 
         <div className="dashboard-shop-layout">
           <aside className="dashboard-department-sidebar">

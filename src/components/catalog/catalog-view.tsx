@@ -83,6 +83,7 @@ export function CatalogView({
   const [bands, setBands] = useState<string[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>("featured");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { state } = useDemo();
   const signedIn = Boolean(state.customerSession);
@@ -254,10 +255,17 @@ export function CatalogView({
             ))}
           </select>
         </label>
+        <button type="button" className="catalog-filter-trigger" onClick={() => setFiltersOpen(true)}>
+          <SlidersIcon /> Filters{filterCount ? ` (${filterCount})` : ""}
+        </button>
       </div>
 
       <div className="catalog-layout">
-        <aside aria-label="Filters">
+        <aside className={filtersOpen ? "catalog-filters open" : "catalog-filters"} aria-label="Filters">
+          <div className="catalog-filter-head">
+            <strong>Filter products</strong>
+            <button type="button" onClick={() => setFiltersOpen(false)} aria-label="Close filters">×</button>
+          </div>
           <SlidersIcon />
           <strong>Filters{filterCount ? ` (${filterCount})` : ""}</strong>
 
@@ -317,7 +325,9 @@ export function CatalogView({
           >
             Clear filters
           </button>
+          <button type="button" className="catalog-apply" onClick={() => setFiltersOpen(false)}>Show {plural(results.length, "product")}</button>
         </aside>
+        {filtersOpen ? <button type="button" className="sheet-backdrop" aria-label="Close filters" onClick={() => setFiltersOpen(false)} /> : null}
 
         <div>
           {results.length ? (

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { database } from "./db";
 import { HttpError, requireRole, type Viewer } from "./http";
 import { catalogCdnUrl } from "./media-delivery";
+import { signedCloudFrontUrl } from "./cloudfront";
 type Media = {
   id: string;
   owner_id: string;
@@ -166,6 +167,11 @@ export async function readMedia(id: string, user: Viewer | null) {
       url: cdnUrl,
       cacheControl:
         "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+    };
+  if (!process.env.S3_ENDPOINT)
+    return {
+      url: signedCloudFrontUrl(media.object_key),
+      cacheControl: "private, no-store",
     };
   const { publicClient, bucket } = config();
   const url = await getSignedUrl(

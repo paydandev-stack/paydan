@@ -8,13 +8,14 @@
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate": "node --conditions=react-server --import tsx scripts/migrate.ts",
     "db:seed": "node --conditions=react-server --import tsx scripts/seed-catalog.ts",
+    "db:bootstrap:departments": "node --conditions=react-server --import tsx scripts/bootstrap-departments.ts",
     "db:seed:local-state": "tsx scripts/seed-local-state.ts",
     "db:seed:users": "tsx scripts/seed-dev-user.ts",
     "db:bootstrap:local": "tsx scripts/bootstrap-local.ts",
     "admin:bootstrap": "tsx scripts/bootstrap-admin.ts",
-    "worker:mail": "tsx scripts/mail-worker.ts",
+    "worker:mail": "node --conditions=react-server --import tsx scripts/mail-worker.ts",
     "worker:payments": "tsx scripts/reconcile-payments.ts",
     "config:check": "tsx scripts/check-config.ts",
     "docker:up": "docker compose up --build -d",
@@ -24,9 +25,13 @@
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"scripts/**/*.ts\" \"tests/**/*.ts\""
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.138",
+    "@ai-sdk/openai-compatible": "^3.0.87",
     "@aws-sdk/client-s3": "^3.1162.0",
+    "@aws-sdk/cloudfront-signer": "^3.1161.0",
     "@aws-sdk/s3-presigned-post": "^3.1162.0",
     "@aws-sdk/s3-request-presigner": "^3.1162.0",
+    "ai": "^7.0.165",
     "better-auth": "^1.7.17",
     "next": "16.4.4",
     "nodemailer": "^10.3.1",
@@ -35,6 +40,7 @@
     "react-dom": "19.3.1",
     "server-only": "^0.0.1",
     "sharp": "^0.35.5",
+    "svix": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

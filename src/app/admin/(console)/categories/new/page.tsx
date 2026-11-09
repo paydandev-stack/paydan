@@ -14,6 +14,7 @@ export default function NewCategory() {
     description: "",
     image: "",
     order: 0,
+    active: true,
     restricted: false,
   });
   const [error, setError] = useState("");

@@ -19,7 +19,12 @@ type Message = {
   text: string;
   productIds?: string[];
   links?: { label: string; href: string }[];
-  cartProposal?: { productId: string; variantId?: string; quantity: number };
+  cartProposal?: {
+    proposalId: string;
+    productId: string;
+    variantId?: string;
+    quantity: number;
+  };
   confirmed?: boolean;
   error?: boolean;
 };
@@ -36,7 +41,6 @@ export function AskPaydan() {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [mobile, setMobile] = useState(false);
-  const [selection, setSelection] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLElement>(null);
@@ -118,6 +122,11 @@ export function AskPaydan() {
     };
   }, [view, mobile]);
   useEffect(() => {
+    const open = () => setView("open");
+    window.addEventListener("paydan:open-assistant", open);
+    return () => window.removeEventListener("paydan:open-assistant", open);
+  }, []);
+  useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [messages, busy, view]);
   async function send(text: string) {
@@ -131,21 +140,68 @@ export function AskPaydan() {
     setThread({ owner, messages: next });
     setDraft("");
     setBusy(true);
+    const assistantId = crypto.randomUUID();
     try {
-      const reply = await api<Omit<Message, "id" | "role">>("/api/assistant", {
-        messages: next
-          .filter((m) => !m.error)
-          .slice(-16)
-          .map((m) => ({ role: m.role, text: m.text })),
+      const response = await fetch("/api/assistant", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: next
+            .filter((m) => !m.error)
+            .slice(-16)
+            .map((m) => ({ role: m.role, text: m.text })),
+          page: { path: location.pathname, title: document.title },
+        }),
       });
-      if (currentOwner.current === requestOwner)
-        setThread({
-          owner: requestOwner,
-          messages: [
-            ...next,
-            { ...reply, id: crypto.randomUUID(), role: "assistant" },
-          ],
-        });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || payload.error || "The assistant is unavailable. Please try again.");
+      }
+      if (!response.body) throw new Error("The assistant returned no response.");
+      let reply: Message = { id: assistantId, role: "assistant", text: "" };
+      const publish = () => {
+        if (currentOwner.current === requestOwner)
+          setThread({ owner: requestOwner, messages: [...next, { ...reply }] });
+      };
+      publish();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as { type: string; text?: string; message?: string; data?: Record<string, unknown> };
+          if (event.type === "text-delta") reply.text += event.text || "";
+          if (event.type === "reply" && event.data) reply = { ...reply, ...event.data } as Message;
+          if (event.type === "error") throw new Error(event.message || "The assistant connection ended early.");
+          if (event.type === "tool-result" && event.data) {
+            const data = event.data as Record<string, unknown>;
+            const products = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
+            const ids = products.map((product) => String((product as { id?: string }).id || "")).filter(Boolean);
+            if (ids.length) reply.productIds = [...new Set([...(reply.productIds || []), ...ids])].slice(0, 6);
+            if (data.kind === "cart-proposal")
+              reply.cartProposal = {
+                proposalId: String(data.proposalId),
+                productId: String(data.productId),
+                variantId: String(data.variantId),
+                quantity: Number(data.quantity),
+              };
+            if (Array.isArray(data.links)) reply.links = data.links as Message["links"];
+            if (data.kind === "auth-required" && typeof data.href === "string")
+              reply.links = [{ label: "Sign in to continue", href: data.href }];
+          }
+          publish();
+        }
+        if (done) break;
+      }
+      if (!reply.text.trim()) reply.text = reply.productIds?.length ? "Here are the closest matches I found." : "I’ve prepared the next step for you.";
+      publish();
     } catch (error) {
       if (currentOwner.current === requestOwner)
         setThread({
@@ -170,12 +226,11 @@ export function AskPaydan() {
   async function confirm(message: Message) {
     const proposal = message.cartProposal;
     if (!proposal || busy) return;
-    const variantId = selection[message.id] || proposal.variantId;
-    if (!variantId) return;
+    if (!proposal.variantId) return;
     if (!state.customerSession) {
       rememberIntent({
         productId: proposal.productId,
-        variantId,
+        variantId: proposal.variantId,
         quantity: proposal.quantity,
         path: "/cart",
       });
@@ -185,10 +240,8 @@ export function AskPaydan() {
     const requestOwner = owner;
     setBusy(true);
     try {
-      await api("/api/commands", {
-        name: "addToCart",
-        args: [proposal.productId, variantId, proposal.quantity],
-        key: message.id,
+      await api("/api/assistant/proposals/confirm", {
+        proposalId: proposal.proposalId,
       });
       await refresh();
       if (currentOwner.current === requestOwner)
@@ -383,17 +436,8 @@ export function AskPaydan() {
                     Choose your option
                     <select
                       aria-label="Product variant"
-                      value={
-                        selection[message.id] ||
-                        message.cartProposal.variantId ||
-                        ""
-                      }
-                      onChange={(e) =>
-                        setSelection({
-                          ...selection,
-                          [message.id]: e.target.value,
-                        })
-                      }
+                      value={message.cartProposal.variantId || ""}
+                      disabled
                     >
                       <option value="">Select an option</option>
                       {product.variants.map((v) => (
@@ -410,8 +454,7 @@ export function AskPaydan() {
                   </label>
                   <button
                     disabled={
-                      busy ||
-                      !(selection[message.id] || message.cartProposal.variantId)
+                      busy || !message.cartProposal.variantId
                     }
                     onClick={() => void confirm(message)}
                   >

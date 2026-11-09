@@ -15,88 +15,6 @@ import {
   SearchIcon,
 } from "@/components/icons";
 
-/**
- * Homepage departments, in the order the design fixed them.
- *
- * The short `copy` is the card tagline — the longer department descriptions on
- * /categories stay in `data/categories.ts`.
- */
-const homeDepartments = [
-  {
-    slug: "supermarket",
-    number: "01",
-    name: "Supermarket",
-    copy: "Everyday pantry essentials",
-  },
-  {
-    slug: "phones-and-tablets",
-    number: "02",
-    name: "Phones & Tablets",
-    copy: "Devices and accessories",
-  },
-  {
-    slug: "village-market",
-    number: "03",
-    name: "Village Market",
-    copy: "Locally sourced market staples",
-  },
-  {
-    slug: "health-and-beauty",
-    number: "04",
-    name: "Health & Beauty",
-    copy: "Care for every routine",
-  },
-  {
-    slug: "fashion",
-    number: "05",
-    name: "Fashion",
-    copy: "Fresh everyday style",
-  },
-  {
-    slug: "food-and-eatery",
-    number: "06",
-    name: "Food & Eatery",
-    copy: "Meals worth sharing",
-  },
-  {
-    slug: "adult-toys",
-    number: "07",
-    name: "Adult Toys",
-    copy: "Private, age-restricted shopping",
-    adult: true,
-  },
-  {
-    slug: "gaming",
-    number: "08",
-    name: "Gaming",
-    copy: "Consoles and accessories",
-  },
-  {
-    slug: "appliances",
-    number: "09",
-    name: "Appliances",
-    copy: "Make home life easier",
-  },
-  {
-    slug: "fuel-and-energy",
-    number: "10",
-    name: "Fuel & Energy",
-    copy: "Energy products and accessories",
-  },
-  {
-    slug: "shoes-and-bags",
-    number: "11",
-    name: "Shoes & Bags",
-    copy: "Finish every look",
-  },
-  {
-    slug: "automotive-and-fuel",
-    number: "12",
-    name: "Automotive",
-    copy: "Tools and accessories",
-  },
-];
-
 const steps = [
   ["01", "Explore", "Browse products across trusted categories."],
   ["02", "Place your order", "Checkout once through the Paydan storefront."],
@@ -194,52 +112,8 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section
-          className="quick-categories"
-          id="categories"
-          aria-label="Quick categories"
-        >
-          {homeDepartments.map((department) => (
-            <Link key={department.slug} href={`/category/${department.slug}`}>
-              <span aria-hidden="true">{department.number}</span>
-              <strong>{department.name}</strong>
-            </Link>
-          ))}
-        </section>
       </div>
 
-      <section className="section department-section">
-        <div className="wrap">
-          <div className="section-heading">
-            <div>
-              <span className="kicker green">SHOP YOUR WAY</span>
-              <h2>Explore departments</h2>
-            </div>
-            <Link href="/categories">
-              View all categories
-              <ArrowRightIcon />
-            </Link>
-          </div>
-
-          <div className="category-grid">
-            {homeDepartments.map((department) => (
-              <Link
-                className={`category-card${department.adult ? " restricted" : ""}`}
-                key={department.slug}
-                href={`/category/${department.slug}`}
-              >
-                <span>{department.number}</span>
-                <div>
-                  <h3>{department.name}</h3>
-                  <p>{department.copy}</p>
-                  {department.adult ? <small>18+ restricted</small> : null}
-                </div>
-                <ChevronRightIcon />
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
 
       <section className="market-feature wrap" id="tech">
         <article className="editorial">

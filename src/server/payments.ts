@@ -18,9 +18,16 @@ import { account } from "./commands";
 import { HttpError, type Viewer } from "./http";
 import { quoteSourced, prepareSourcedPayment } from "./sourced-orders";
 import { checkout, kobo, naira } from "./schemas";
+import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
+import { isTestBuyer } from "./test-buyer";
 
 type Input = ReturnType<typeof checkout.parse>;
 export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
+  if (isTestBuyer(user))
+    throw new HttpError(
+      409,
+      "Checkout is disabled for the private test catalogue.",
+    );
   if (input.orderId) return quoteSourced(db, user, input.orderId, input);
   const acc = await account(db, user);
   if (!acc.cart.length) throw new HttpError(409, "Your cart is empty.");
@@ -424,15 +431,24 @@ export async function verifyPayment(reference: string, user?: Viewer) {
       },
       order.customerId,
     );
-    await db.query(
-      "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-      [
-        randomUUID(),
-        order.customerEmail,
-        `PAYDAN payment received — ${order.reference}`,
-        `We received NGN ${order.total.toFixed(2)}. Track your order from your dashboard.`,
-      ],
-    );
+    await enqueueMail(db, {
+      eventKey: `payment:${reference}:paid:customer`,
+      eventType: "payment.received",
+      recipient: order.customerEmail,
+      template: "payment.received",
+      data: {
+        reference: order.reference,
+        orderId: order.id,
+        amount: new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(order.total),
+      },
+    });
+    await enqueueOperationsAlert(db, {
+      eventKey: `payment:${reference}:paid`,
+      eventType: "payment.received",
+      title: "Payment confirmed",
+      message: `Paystack confirmed payment for order ${order.reference}.`,
+      href: `/admin/orders/${order.id}`,
+    });
   });
   return { status: "paid", orderId: payment.order_id };
 }

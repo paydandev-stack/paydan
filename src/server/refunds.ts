@@ -4,6 +4,7 @@ import { database, put, record, transaction } from "./db";
 import { HttpError, requireRole, type Viewer } from "./http";
 import { kobo } from "./schemas";
 import { paystack } from "./payments";
+import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
 export async function refundReturn(user: Viewer, returnId: string) {
   requireRole(user, ["Order Manager"]);
   const prepared = await transaction(async (db) => {
@@ -129,5 +130,19 @@ export async function verifyRefund(providerId: string) {
       done: true,
     });
     await put(db, "orders", order.id, order, order.customerId);
+    await enqueueMail(db, {
+      eventKey: `refund:${refund.id}:processed:customer`,
+      eventType: "refund.processed",
+      recipient: order.customerEmail,
+      template: "refund.processed",
+      data: { reference: order.reference, orderId: order.id },
+    });
+    await enqueueOperationsAlert(db, {
+      eventKey: `refund:${refund.id}:processed`,
+      eventType: "refund.processed",
+      title: "Refund processed",
+      message: `Paystack confirmed the refund for order ${order.reference}.`,
+      href: "/admin/returns",
+    });
   });
 }

@@ -14,11 +14,12 @@ export async function GET(request: Request) {
           : "not configured",
       storage: !!(process.env.AWS_REGION && process.env.S3_BUCKET),
       email: !!(process.env.SMTP_HOST && process.env.MAIL_FROM),
-      ai: !!(
-        process.env.AI_CHAT_COMPLETIONS_URL &&
-        process.env.AI_API_KEY &&
-        process.env.AI_MODEL
-      ),
+      ai:
+        (process.env.AI_PROVIDER_PROFILE ||
+          (process.env.NODE_ENV === "production" ? "production" : "test")) ===
+        "production"
+          ? !!(process.env.AI_PRIMARY_MODEL && process.env.AI_SECONDARY_MODEL)
+          : !!process.env.GROQ_API_KEY,
     });
   } catch (error) {
     return failure(error);

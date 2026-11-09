@@ -16,7 +16,7 @@ Populate `.env.local` privately; never commit it or send secret keys in chat. No
 | Service        | Required configuration                                                                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------- |
 | PostgreSQL     | Pooled `DATABASE_URL`; direct `DATABASE_URL_UNPOOLED` for migrations; verified TLS settings                 |
-| Authentication | `BETTER_AUTH_URL` (exact origin, HTTPS in production), `BETTER_AUTH_SECRET` (at least 32 random characters) |
+| Authentication | `BETTER_AUTH_URL` (canonical exact origin, HTTPS in production), `BETTER_AUTH_TRUSTED_ORIGINS` (comma-separated additional custom/preview origins), `BETTER_AUTH_SECRET` (at least 32 random characters) |
 | Google         | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                  |
 | Paystack       | `PAYSTACK_SECRET_KEY`; use a test key for staging                                                           |
 | S3             | `AWS_REGION`, `S3_BUCKET`; prefer an IAM role, or local AWS SDK credentials                                 |

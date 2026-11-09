@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useDemo } from "@/lib/store";
 
 const nav = [
@@ -18,12 +18,19 @@ const nav = [
 export default function AccountLayout({ children }: { children: ReactNode }) {
   const { state, actions } = useDemo();
   const pathname = usePathname();
+  const [navOpen, setNavOpen] = useState(false);
   const session = state.customerSession;
+  useEffect(() => setNavOpen(false), [pathname]);
+  const activeLabel = nav.find((item) => pathname === item.href)?.label ?? "Account";
 
   return (
     <div className="wrap account-wrap">
       <div className="account-shell">
-        <aside>
+        <button type="button" className="account-nav-trigger" onClick={() => setNavOpen(true)} aria-expanded={navOpen}>
+          <span><small>Your account</small><strong>{activeLabel}</strong></span><b aria-hidden="true">⌄</b>
+        </button>
+        <aside className={navOpen ? "open" : undefined}>
+          <div className="account-nav-head"><strong>Account menu</strong><button type="button" onClick={() => setNavOpen(false)} aria-label="Close account menu">×</button></div>
           <strong>{session ? session.name : "Guest"}</strong>
 
           {nav.map((item) => (
@@ -44,6 +51,7 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
             <Link href="/login">Sign in</Link>
           )}
         </aside>
+        {navOpen ? <button type="button" className="sheet-backdrop" aria-label="Close account menu" onClick={() => setNavOpen(false)} /> : null}
 
         <section>
           {session ? (

@@ -1,16 +1,24 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { database } from "./db";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { enqueueSystemMail } from "./mail/queue";
+import { trustedOrigins } from "./origins";
 
 export async function enqueueMail(
   recipient: string,
   subject: string,
   body: string,
 ) {
-  await database().query(
-    "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-    [randomUUID(), recipient, subject, body],
-  );
+  const isReset = subject.toLowerCase().includes("reset");
+  const url = body.match(/https?:\/\/\S+/)?.[0] || "";
+  const digest = createHash("sha256").update(url || body).digest("hex");
+  await enqueueSystemMail({
+    eventKey: `auth:${isReset ? "reset" : "verify"}:${digest}`,
+    eventType: isReset ? "auth.password_reset" : "auth.email_verification",
+    recipient,
+    template: isReset ? "auth.reset" : "auth.verify",
+    data: { url },
+  });
 }
 let instance: ReturnType<typeof betterAuth> | undefined;
 export function auth() {
@@ -24,7 +32,7 @@ export function auth() {
     database: database(),
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
-    trustedOrigins: [process.env.BETTER_AUTH_URL],
+    trustedOrigins: trustedOrigins(),
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 12,

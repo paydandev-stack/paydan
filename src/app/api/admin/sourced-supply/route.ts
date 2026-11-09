@@ -12,6 +12,7 @@ import {
   viewer,
 } from "@/server/http";
 import { amount } from "@/server/schemas";
+import { enqueueMail } from "@/server/mail/queue";
 export async function POST(request: Request) {
   try {
     sameOrigin(request);
@@ -79,15 +80,13 @@ export async function POST(request: Request) {
         confirmedAt: new Date().toISOString(),
         vendorId: vendor.id,
       });
-      await db.query(
-        "INSERT INTO mail_outbox(id,recipient,subject,body) VALUES($1,$2,$3,$4)",
-        [
-          randomUUID(),
-          order.customerEmail,
-          "Your sourced order is ready for payment",
-          `Supplier availability is confirmed for ${order.reference}. Review delivery and payment in your account.`,
-        ],
-      );
+      await enqueueMail(db, {
+        eventKey: `sourced-order:${order.id}:supply-ready:customer`,
+        eventType: "sourcing.supply_ready",
+        recipient: order.customerEmail,
+        template: "sourcing.supply_ready",
+        data: { reference: order.reference, orderId: order.id },
+      });
     });
     return json({ saved: true });
   } catch (error) {

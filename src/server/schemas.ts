@@ -91,6 +91,7 @@ export const category = z.object({
   description: text,
   image,
   order: z.number().int().min(0),
+  active: z.boolean().optional(),
   restricted: z.boolean(),
   subcategories: z.array(z.object({ slug: id, name: short })).max(100),
   facets: z.array(short).max(30),

@@ -56,11 +56,15 @@ The mobile work should reorganize the existing experience, not redesign the bran
 ### AI provider strategy
 
 - Use the Vercel AI SDK for streaming, typed tool calls and UI message parts.
-- Use Vercel AI Gateway so providers can be changed without rewriting the feature.
-- Start the evaluation with `anthropic/claude-haiku-5.5` as the primary low-cost candidate.
-- Use `openai/gpt-6-luna` as the first fallback/evaluation candidate.
-- Do not permanently select a winner until both models run the PAYDAN evaluation suite.
+- Use Vercel AI Gateway for the two production model vendors so they can be evaluated, reordered and failed over without rewriting the feature.
+- Production slot 1 starts with `anthropic/claude-haiku-5.5` as the primary low-cost candidate.
+- Production slot 2 starts with `openai/gpt-6-luna` as the secondary provider/model and automatic production fallback.
+- Add a direct Groq adapter using `openai/gpt-oss-20b` and the Groq free-plan API key for development and Preview testing only. This is a third provider slot, not an unrestricted production fallback.
+- Always retain a final deterministic non-AI fallback that returns normal catalogue/search/support links when no permitted model succeeds.
+- In the default test profile, Groq runs by itself so free testing does not silently spend Gateway credits. An explicit `last` test mode may run Gateway primary, Gateway secondary, then Groq, but it must never be the default.
+- Do not permanently select production ordering until both production models run the PAYDAN evaluation suite. Run the same safe read-only evaluation against Groq to measure whether it is adequate for testing.
 - Set Gateway project and key budgets before enabling production traffic.
+- Never send real customer/order data through the free Groq test profile; use synthetic catalogue, account and order fixtures.
 
 ### Search strategy
 
@@ -124,22 +128,51 @@ Create a small provider-neutral module, for example:
 
 Responsibilities:
 
-- Read and validate Gateway configuration.
-- Select the primary and fallback model.
+- Read and validate the selected routing profile and its provider credentials.
+- Select the primary production model, secondary production model, or isolated Groq test model.
+- Configure the Gateway model fallback array in the order `AI_MODEL_PRIMARY`, then `AI_MODEL_SECONDARY`.
+- Prevent the Groq test adapter from running when `VERCEL_ENV=production` or `NODE_ENV=production`, even if a stale variable tries to enable it.
 - Apply conservative generation limits, tool-step limits and timeouts.
+- Fail over only for transient provider/network errors, timeouts, rate limits and provider 5xx failures. Do not mask authentication, invalid-request, safety, authorization, schema or application-tool errors by trying another model.
+- Do not replay a write tool or confirmed cart mutation during provider failover. Provider selection happens before a write, while server-side action receipts remain idempotent.
 - Attach non-PII observability tags such as access tier and route.
+- Record which provider/model served the request, which fallback was attempted, latency, token usage and a sanitized failure class.
 - Return the existing graceful unavailable response when AI is disabled.
 
-Proposed production variables:
+Proposed shared and production variables:
 
 ```env
+AI_ENABLED=false
+AI_ROUTING_PROFILE=production
 AI_GATEWAY_API_KEY=
 AI_MODEL_PRIMARY=anthropic/claude-haiku-5.5
-AI_MODEL_FALLBACK=openai/gpt-6-luna
-AI_ENABLED=false
+AI_MODEL_SECONDARY=openai/gpt-6-luna
+AI_PROVIDER_TIMEOUT_MS=12000
+AI_TOTAL_TIMEOUT_MS=25000
 ```
 
-Update `.env.example`, `.env.vercel` and `scripts/check-config.ts`. Remove `AI_CHAT_COMPLETIONS_URL` only after the new adapter is working and production has been migrated.
+Proposed development/Preview Groq variables:
+
+```env
+AI_ROUTING_PROFILE=test
+AI_TEST_GROQ_ENABLED=true
+AI_TEST_GROQ_MODE=only
+AI_GROQ_BASE_URL=https://api.groq.com/openai/v1
+AI_GROQ_API_KEY=
+AI_GROQ_MODEL=openai/gpt-oss-20b
+```
+
+Allowed routing profiles and behaviour:
+
+| Profile | Provider order | Intended environment |
+|---|---|---|
+| `production` | Gateway primary -> Gateway secondary -> deterministic non-AI fallback | Production; Groq test variables are ignored |
+| `test`, Groq mode `only` | Groq -> deterministic non-AI fallback | Local development and Vercel Preview; default free-testing mode |
+| `test`, Groq mode `last` | Gateway primary -> Gateway secondary -> Groq -> deterministic non-AI fallback | Explicit failover QA only; may consume Gateway credits |
+
+`AI_GATEWAY_API_KEY` authenticates both production model slots through Vercel AI Gateway. Direct `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` variables are not required unless PAYDAN later enables Gateway BYOK. `AI_GROQ_API_KEY` is separate and is accepted only by the test-only Groq adapter.
+
+Update `.env.example`, `.env.vercel` and `scripts/check-config.ts` as part of implementation. Keep the current `AI_CHAT_COMPLETIONS_URL`, `AI_API_KEY` and `AI_MODEL` variables until the new adapter passes tests and deployment has migrated; then mark them deprecated, remove their reads, and remove them from the environment files in a later cleanup commit.
 
 ### 5.2 Server-controlled tools
 
@@ -344,6 +377,9 @@ Preserve the vertical sticky department rail on desktop and tablet. On phones:
 - Never ask for passwords, OTPs, card details or API keys.
 - Require confirmation for every write action.
 - Maintain a hard deny list for payments, refunds, discounts, fulfilment and staff operations.
+- Treat `AI_GATEWAY_API_KEY` and `AI_GROQ_API_KEY` as server-only secrets; never prefix them with `NEXT_PUBLIC_`, serialize them to the browser, log them, or commit them.
+- Enforce the Groq test-only environment guard in code, not merely through Vercel dashboard conventions.
+- Use synthetic users, orders and conversations in the free Groq profile. Production customer traffic must use the approved production routing profile.
 
 ## 8. Evaluation and QA
 
@@ -370,7 +406,11 @@ Launch gates:
 - Zero unconfirmed mutations.
 - Zero claims of successful payment/refund/order placement.
 - Correct tool selection and useful results on the agreed evaluation threshold.
-- Graceful provider timeout and fallback behaviour.
+- Gateway primary failure reaches the secondary model once and preserves a valid streamed response.
+- When both production models fail, the deterministic non-AI fallback appears without leaking provider details.
+- Groq `only` works in development/Preview and is rejected in Production.
+- Explicit Groq `last` failover works in test without duplicating tool actions.
+- Authentication/configuration errors fail closed rather than silently using a different paid or free provider.
 
 ### Mobile test matrix
 
@@ -405,7 +445,7 @@ Acceptance criteria:
 
 - Capture mobile screenshots and performance/accessibility baselines for required routes.
 - Create the AI evaluation dataset and mock tool harness.
-- Add the AI feature flag and Gateway budget.
+- Add the AI feature flag, routing-profile validation, Gateway budget and test-only Groq guard.
 - Add the final mobile CSS layer and shared safe-area variables.
 
 ### Milestone 1 — Mobile shell
@@ -428,7 +468,7 @@ Acceptance criteria:
 - Add product-result and comparison components.
 - Add context-aware starters.
 - Complete guest/member price handling through tool DTOs.
-- Add provider fallback, observability and evaluation runs.
+- Add Gateway primary/secondary failover, isolated Groq test routing, deterministic fallback, observability and evaluation runs.
 
 This is the minimum valuable AI release.
 
@@ -449,7 +489,8 @@ This is the minimum valuable AI release.
 ### Milestone 6 — Hardening and rollout
 
 - Run security, evaluation, responsive and accessibility suites.
-- Test both candidate models and select the primary from measured results.
+- Test both production candidate models and the Groq test model; select production order from measured results.
+- Verify Production cannot select the Groq free profile and Preview cannot accidentally use real customer data.
 - Roll out to internal accounts, then a small customer percentage, then general availability.
 - Monitor no-result rate, tool errors, latency, cost per conversation, proposal confirmation and human-handoff rate.
 
@@ -464,6 +505,9 @@ AI:
 - `migrations/004_assistant_proposals.sql`
 - `src/server/assistant.ts`
 - `src/server/ai/client.ts`
+- `src/server/ai/config.ts`
+- `src/server/ai/providers/gateway.ts`
+- `src/server/ai/providers/groq.ts`
 - `src/server/ai/search.ts`
 - `src/server/ai/tools/*`
 - `src/app/api/assistant/route.ts`
@@ -471,6 +515,7 @@ AI:
 - `src/components/assistant/*`
 - `tests/assistant-tools.test.ts`
 - `tests/assistant-security.test.ts`
+- `tests/assistant-provider-routing.test.ts`
 
 Mobile:
 

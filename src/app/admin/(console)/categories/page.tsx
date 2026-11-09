@@ -17,6 +17,7 @@ type Draft = {
   title: string;
   description: string;
   order: string;
+  active: boolean;
   restricted: boolean;
   facets: string;
 };
@@ -26,6 +27,7 @@ function toDraft(category: Category): Draft {
     title: category.title,
     description: category.description,
     order: String(category.order),
+    active: category.active !== false,
     restricted: category.restricted,
     facets: category.facets.join(", "),
   };
@@ -69,6 +71,7 @@ export default function AdminCategoriesPage() {
         title,
         description: draft.description.trim(),
         order,
+        active: draft.active,
         restricted: draft.restricted,
         facets: draft.facets
           .split(",")
@@ -127,6 +130,9 @@ export default function AdminCategoriesPage() {
                       <strong>{category.name}</strong>
                       {category.restricted ? (
                         <StatusPill tone="red">18+</StatusPill>
+                      ) : null}
+                      {category.active === false ? (
+                        <StatusPill tone="gray">Archived</StatusPill>
                       ) : null}
                     </span>
                     <small style={{ display: "block", color: "var(--muted)" }}>
@@ -218,6 +224,25 @@ export default function AdminCategoriesPage() {
                 hint="Lower numbers appear first."
               />
               <label
+                className={`choice${draft.active ? " active" : ""}`}
+                style={{ margin: 0 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.active}
+                  onChange={(event) =>
+                    setDraftField("active", event.target.checked)
+                  }
+                />
+                <span>
+                  Visible in storefront
+                  <small>
+                    Turn this off to remove the department from customer pages
+                    without losing its setup.
+                  </small>
+                </span>
+              </label>
+              <label
                 className={`choice${draft.restricted ? " active" : ""}`}
                 style={{ margin: 0 }}
               >
@@ -263,8 +288,8 @@ export default function AdminCategoriesPage() {
               }}
             >
               Select a department in the table to edit its name, shelf copy,
-              sort order, 18+ flag and facet filters. Changes apply to the
-              storefront navigation immediately.
+              sort order, visibility, 18+ flag and facet filters. Changes
+              apply to the storefront navigation immediately.
             </p>
           )}
         </aside>

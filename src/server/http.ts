@@ -3,6 +3,8 @@ import { z } from "zod";
 import { auth } from "./auth";
 import { database, records } from "./db";
 import type { AdminRole, TeamMember } from "@/lib/types";
+import { isTrustedOrigin } from "./origins";
+import { ensureTestBuyerData } from "./test-buyer";
 
 export class HttpError extends Error {
   constructor(
@@ -45,12 +47,14 @@ export async function viewer(headers: Headers): Promise<Viewer | null> {
       m.email.toLowerCase() === session.user.email.toLowerCase() &&
       m.status === "active",
   );
-  return {
+  const result = {
     id: session.user.id,
     name: session.user.name,
     email: session.user.email,
     role: member?.role,
   };
+  await ensureTestBuyerData(result);
+  return result;
 }
 export function requireUser(user: Viewer | null): asserts user is Viewer {
   if (!user)
@@ -62,8 +66,7 @@ export function requireRole(user: Viewer | null, roles: AdminRole[]) {
     throw new HttpError(403, "Your role cannot perform this action.");
 }
 export function sameOrigin(request: Request) {
-  const expected = new URL(process.env.BETTER_AUTH_URL || request.url).origin;
-  if (request.headers.get("origin") !== expected)
+  if (!isTrustedOrigin(request.headers.get("origin")))
     throw new HttpError(403, "Invalid request origin.");
 }
 export async function body(request: Request) {

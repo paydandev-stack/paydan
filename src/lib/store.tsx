@@ -99,6 +99,7 @@ type Actions = {
         | "title"
         | "description"
         | "order"
+        | "active"
         | "restricted"
         | "facets"
         | "subcategories"
