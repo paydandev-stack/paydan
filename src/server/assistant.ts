@@ -9,7 +9,7 @@ import { database } from "./db";
 import { HttpError, type Viewer } from "./http";
 import { snapshot } from "./snapshot";
 import { assistantModels } from "./assistant/providers";
-import { isTransientAIError } from "./assistant/config";
+import { providerCooldownMs } from "./assistant/config";
 import { assistantTools } from "./assistant/tools";
 
 export const chatInput = z.object({
@@ -53,9 +53,36 @@ export async function chat(user: Viewer | null, raw: unknown) {
   return deterministicReply(user, chatInput.parse(raw));
 }
 
+// Best-effort per-instance provider cooldown; Vercel serverless instances do not share it.
+const cooldownUntil = new Map<string, number>();
+
+function safeErrorFields(error: unknown): { status: number | string; message: string } {
+  const value = error as { statusCode?: number; status?: number; message?: string } | null;
+  return {
+    status: value?.statusCode ?? value?.status ?? "unknown",
+    message: String(value?.message || "Unknown provider error")
+      .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/\b(sk[-_][A-Za-z0-9_-]{8,})\b/g, "[REDACTED]")
+      .slice(0, 320),
+  };
+}
+
+function noTextToolSummary(data: unknown): string {
+  const item = data as { kind?: string; products?: unknown[] } | null;
+  if (item?.kind === "products") {
+    return item.products?.length ? "Here are the relevant products I found in PAYDAN's catalogue." : "I couldn't find a matching product in PAYDAN's catalogue.";
+  }
+  if (item?.kind === "cart-proposal") return "Please review and confirm this cart selection before I add anything.";
+  if (item?.kind === "auth-required") return "Please sign in to continue with that request.";
+  if (item?.kind === "not-found") return "I couldn't find that product in the current catalogue.";
+  return "I've checked PAYDAN's current information. Review the result shown below.";
+}
+
 export async function chatResponse(user: Viewer | null, raw: unknown, abortSignal?: AbortSignal) {
   const input = chatInput.parse(raw);
-  const models = assistantModels();
+  const configured = assistantModels();
+  const available = configured.filter(({ name }) => (cooldownUntil.get(name) || 0) <= Date.now());
+  const models = available.length ? available : configured;
   const tools = await assistantTools(user);
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -65,6 +92,8 @@ export async function chatResponse(user: Viewer | null, raw: unknown, abortSigna
       try {
         for (const [index, candidate] of models.entries()) {
           let emitted = false;
+          let producedText = false;
+          let lastToolResult: unknown = null;
           try {
             const result = streamText({
               model: candidate.model,
@@ -77,41 +106,48 @@ export async function chatResponse(user: Viewer | null, raw: unknown, abortSigna
               abortSignal,
             });
             for await (const part of result.fullStream) {
-              if (part.type === "text-delta") {
+              if (part.type === "text-delta" && part.text) {
+                producedText = true;
                 emitted = true;
                 write({ type: "text-delta", text: part.text });
               } else if (part.type === "tool-result") {
+                lastToolResult = part.output;
                 emitted = true;
                 write({ type: "tool-result", toolName: String(part.toolName), data: part.output });
-              } else if (part.type === "error") throw part.error;
+              } else if (part.type === "tool-error" || part.type === "error") {
+                throw part.error;
+              }
             }
+            if (!emitted) throw new Error("Provider finished without text or tool results");
+            if (!producedText) write({ type: "text-delta", text: noTextToolSummary(lastToolResult) });
+            cooldownUntil.delete(candidate.name);
+            console.info("[Ask PAYDAN] AI provider succeeded", { provider: candidate.name });
             completed = true;
             break;
           } catch (error) {
-            const err = error as {
-              statusCode?: number;
-              status?: number;
-              message?: string;
-            };
-
-            console.error("[Ask PAYDAN] AI provider failed", {
-              provider: candidate.name,
-              status: err?.statusCode ?? err?.status ?? "unknown",
-              message: err?.message ?? "Unknown provider error",
-            });
-
-  if (emitted) {
+            const fields = safeErrorFields(error);
+            console.error("[Ask PAYDAN] AI provider failed", { provider: candidate.name, ...fields });
+            const cooldown = providerCooldownMs(error);
+            if (cooldown) cooldownUntil.set(candidate.name, Date.now() + cooldown);
+            if (emitted) {
               write({ type: "error", message: "The assistant connection ended early. Please retry your message." });
               completed = true;
               break;
             }
-            const hasNext = index < models.length - 1;
-            if (!hasNext) break;
+            if (abortSignal?.aborted) {
+              completed = true;
+              break;
+            }
+            if (index === models.length - 1) break;
           }
         }
-        if (!completed) write({ type: "reply", data: await deterministicReply(user, input) });
+        if (!completed) {
+          console.warn("[Ask PAYDAN] All live models failed; using deterministic fallback");
+          write({ type: "reply", data: await deterministicReply(user, input) });
+        }
         write({ type: "done" });
-      } catch {
+      } catch (error) {
+        console.error("[Ask PAYDAN] Request failed; using deterministic fallback", safeErrorFields(error));
         write({ type: "reply", data: await deterministicReply(user, input) });
         write({ type: "done" });
       } finally {

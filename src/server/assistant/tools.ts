@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import type { Product } from "@/lib/types";
+import { normalizeProductQuery, searchRelevantProducts } from "@/lib/assistant";
 import { database } from "../db";
 import type { Viewer } from "../http";
 import { snapshot } from "../snapshot";
@@ -26,31 +27,36 @@ function productResult(product: Product, signedIn: boolean) {
   };
 }
 
-function simpleScore(product: Product, query: string) {
-  const terms = query.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 1);
-  const name = product.name.toLowerCase();
-  const haystack = [product.name, product.brand, product.description, product.categorySlug, ...(product.highlights || [])].join(" ").toLowerCase();
-  return terms.reduce((score, term) => score + (name.includes(term) ? 4 : haystack.includes(term) ? 1 : 0), 0);
-}
+/** Use verified whole-word candidates before the optional PostgreSQL ranking. */
+async function rankedProducts(query: string, products: Product[], limit: number): Promise<Product[]> {
+  const eligible = searchRelevantProducts(query, products, products.length);
+  if (!eligible.length) return [];
+  if (!process.env.DATABASE_URL) return eligible.slice(0, limit);
 
-async function rankedProducts(query: string, products: Product[], limit: number) {
-  if (process.env.DATABASE_URL) {
-    try {
-      const result = await database().query(
-        `SELECT product_id FROM product_search
-         WHERE search_document @@ websearch_to_tsquery('simple',$1) OR search_text % $1
-         ORDER BY ts_rank(search_document,websearch_to_tsquery('simple',$1)) DESC,
-                  similarity(search_text,$1) DESC LIMIT $2`,
-        [query, limit],
-      );
-      const byId = new Map(products.map((product) => [product.id, product]));
-      const ranked = result.rows.map((row) => byId.get(row.product_id)).filter(Boolean) as Product[];
-      if (ranked.length) return ranked;
-    } catch (error) {
-      if ((error as { code?: string }).code !== "42P01") throw error;
-    }
+  // PostgreSQL full-text/trigram ranking can help order matches, but it may
+  // never introduce unrelated items that failed deterministic validation.
+  try {
+    const result = await database().query(
+      `SELECT product_id FROM product_search
+       WHERE product_id = ANY($2::text[])
+         AND (search_document @@ websearch_to_tsquery('simple',$1) OR search_text % $1)
+       ORDER BY ts_rank(search_document,websearch_to_tsquery('simple',$1)) DESC,
+                similarity(search_text,$1) DESC LIMIT $3`,
+      [normalizeProductQuery(query), eligible.map((item) => item.id), Math.max(limit, 30)],
+    );
+    const byId = new Map(eligible.map((product) => [product.id, product]));
+    const dbRanked = result.rows
+      .map((row) => byId.get(String(row.product_id)))
+      .filter((item): item is Product => Boolean(item));
+    const seen = new Set(dbRanked.map((item) => item.id));
+    return [...dbRanked, ...eligible.filter((item) => !seen.has(item.id))].slice(0, limit);
+  } catch (error) {
+    // An unavailable search index should not take the shopping assistant down.
+    console.warn("[Ask PAYDAN] Falling back to verified catalogue ranking", {
+      code: (error as { code?: string })?.code || "unknown",
+    });
+    return eligible.slice(0, limit);
   }
-  return products.map((product) => ({ product, score: simpleScore(product, query) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score).slice(0, limit).map((entry) => entry.product);
 }
 
 export async function assistantTools(user: Viewer | null) {

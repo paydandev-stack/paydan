@@ -1,14 +1,9 @@
 import type { Category, FulfillmentStatus, Product } from "./types";
 
 /**
- * Ask PAYDAN — reply engine for the demo assistant.
- *
- * This build has **no live model** (plan §2: absent rather than faked), so
- * answers are matched locally against the current catalogue and approved
- * content. Every reply is derived from real data: nothing here invents prices,
- * stock, delivery promises or policy terms. Guest replies never carry money —
- * product results are returned as ids and mapped through `toViewerProducts`
- * in the UI, which is the only price gate.
+ * Ask PAYDAN's conservative deterministic fallback when live providers fail.
+ * Answers only reference the approved catalogue and account-specific context.
+ * Product identifiers are resolved by the frontend's permission-aware DTO.
  */
 
 export type AssistantLink = { href: string; label: string };
@@ -95,48 +90,138 @@ const STOPWORDS = new Set([
   "shop",
 ]);
 
-function tokens(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9₦]+/i)
-    .filter((token) => token.length > 1 && !STOPWORDS.has(token));
+/**
+ * Conservative shared catalogue matching for live tools and degraded mode.
+ * Whole-word matching prevents `car` matching `skincare` or `carryall`.
+ * Prefer not returning a product over showing misleading alternatives.
+ */
+const PRODUCT_QUERY_FILLERS = new Set([
+  ...STOPWORDS,
+  "me", "my", "some", "any", "kind", "kinds", "type", "types",
+  "available", "availability", "options", "option", "best", "good", "better",
+  "cheap", "affordable", "expensive", "under", "over", "around", "below", "above",
+  "recommendation", "recommendations", "price", "prices", "much", "please",
+  "could", "would", "should", "like", "just", "more", "one", "ones", "items", "item",
+]);
+
+function normalizeWord(value: string): string {
+  if (value.endsWith("ies") && value.length > 4) return `${value.slice(0, -3)}y`;
+  if (value.endsWith("s") && !value.endsWith("ss") && value.length > 3)
+    return value.slice(0, -1);
+  return value;
 }
 
-function scoreProduct(product: Product, query: string): number {
-  const queryTokens = tokens(query);
-  if (queryTokens.length === 0) return 0;
-  const name = product.name.toLowerCase();
-  const haystack = [
-    product.name,
+function wordList(value: string): string[] {
+  return (value.toLowerCase().match(/[a-z0-9]+/g) || []).map(normalizeWord);
+}
+
+function tokens(value: string): string[] {
+  return wordList(value).filter((token) => token.length > 1 && !PRODUCT_QUERY_FILLERS.has(token));
+}
+
+const FOOTWEAR = new Set([
+  "shoe", "sneaker", "trainer", "boot", "sandal", "slipper", "loafer",
+  "heel", "footwear", "flat", "cleat",
+]);
+const VEHICLES = new Set([
+  "car", "vehicle", "automobile", "sedan", "suv", "hatchback", "coupe",
+  "convertible", "crossover", "truck", "minivan",
+]);
+const SMARTPHONES = new Set(["phone", "smartphone", "iphone", "mobile", "handset"]);
+const BAGS = new Set(["bag", "handbag", "purse", "tote", "carryall", "backpack", "satchel"]);
+const VEHICLE_ACCESSORIES = new Set([
+  "care", "detail", "wash", "cleaner", "polish", "wax", "charger", "charging",
+  "cover", "mat", "battery", "oil", "tire", "tyre", "accessory", "freshener",
+  "holder", "mount", "keychain", "part", "kit", "tool",
+]);
+
+/** Remove shopping chatter; useful when searching `what of some shoes?`. */
+export function normalizeProductQuery(query: string): string {
+  return tokens(query).join(" ");
+}
+
+function relatedTerms(token: string): Set<string> {
+  if (FOOTWEAR.has(token)) return FOOTWEAR;
+  if (VEHICLES.has(token)) return VEHICLES;
+  if (SMARTPHONES.has(token)) return SMARTPHONES;
+  if (BAGS.has(token)) return BAGS;
+  return new Set([token]);
+}
+
+function overlaps(a: Set<string>, b: Set<string>): boolean {
+  for (const term of a) if (b.has(term)) return true;
+  return false;
+}
+
+function productScore(product: Product, queryTokens: string[]): number {
+  const name = new Set(wordList(product.name));
+  const content = new Set(wordList([
     product.brand,
     product.description,
-    product.categorySlug,
-    ...product.highlights,
-    ...Object.keys(product.specifications),
-    ...Object.values(product.specifications),
-  ]
-    .join(" ")
-    .toLowerCase();
+    ...(product.highlights || []),
+    ...Object.keys(product.specifications || {}),
+    ...Object.values(product.specifications || {}),
+  ].join(" ")));
+  const category = new Set(wordList(product.categorySlug));
 
-  let score = 0;
-  for (const token of queryTokens) {
-    if (name.includes(token)) score += name.startsWith(token) ? 4 : 3;
-    else if (haystack.includes(token)) score += 1;
+  // A request for a car is not a request for car shampoo or spare parts.
+  if (queryTokens.length === 1 && VEHICLES.has(queryTokens[0])) {
+    if (overlaps(name, VEHICLE_ACCESSORIES)) return 0;
+    if (!overlaps(name, VEHICLES) && !overlaps(content, VEHICLES)) return 0;
   }
-  return score;
+
+  // `shoes-and-bags` is a mixed department: bags are not footwear.
+  if (queryTokens.some((token) => FOOTWEAR.has(token))) {
+    if (!overlaps(name, FOOTWEAR) && !overlaps(content, FOOTWEAR)) return 0;
+    if (overlaps(name, new Set(["bag", "handbag", "carryall", "tote", "purse"])) && !overlaps(name, FOOTWEAR)) return 0;
+  }
+
+  // `shoes-and-bags` is a mixed department: sneakers are not handbags.
+  if (queryTokens.some((token) => BAGS.has(token))) {
+    if (!overlaps(name, BAGS) && !overlaps(content, BAGS)) return 0;
+    if (overlaps(name, FOOTWEAR) && !overlaps(name, BAGS)) return 0;
+  }
+
+  // Search for phones must not silently return headphones or phone accessories.
+  if (queryTokens.length === 1 && SMARTPHONES.has(queryTokens[0])) {
+    if (!overlaps(name, SMARTPHONES) && !overlaps(content, SMARTPHONES)) return 0;
+    if (overlaps(name, new Set(["case", "charger", "cover", "cable", "holder", "headphone", "earphone", "earbud"]))) return 0;
+  }
+
+  let total = 0;
+  let matched = 0;
+  for (const token of queryTokens) {
+    const terms = relatedTerms(token);
+    if (overlaps(name, terms)) { total += 6; matched++; }
+    else if (overlaps(content, terms)) { total += 2; matched++; }
+    else if (overlaps(category, terms) && !FOOTWEAR.has(token) && !VEHICLES.has(token) && !BAGS.has(token)) {
+      total += 1;
+      matched++;
+    }
+  }
+  // Multiple significant terms must mostly match; don't recommend unrelated items.
+  if (matched < Math.ceil(queryTokens.length * 0.6)) return 0;
+  return total;
 }
 
-function searchProducts(
+/** Returns published catalogue candidates already filtered by caller permission. */
+export function searchRelevantProducts(
   query: string,
   products: Product[],
   limit = 4,
 ): Product[] {
+  const queryTokens = tokens(query);
+  if (!queryTokens.length) return [];
   return products
-    .map((product) => ({ product, score: scoreProduct(product, query) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .map((product) => ({ product, score: productScore(product, queryTokens) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name))
     .slice(0, limit)
-    .map((entry) => entry.product);
+    .map(({ product }) => product);
+}
+
+function searchProducts(query: string, products: Product[], limit = 4): Product[] {
+  return searchRelevantProducts(query, products, limit);
 }
 
 function matchCategory(
@@ -444,7 +529,7 @@ if (
 
   // 14. Honest fallback.
   return {
-    text: "I couldn't match that to anything I can do here — I'm a rule-based demo assistant, and no live model is connected to this build yet. I can find products, explain departments and policies, track your orders, and start a sourcing request.",
+    text: "I couldn't find a reliable match in PAYDAN's catalogue. You can browse departments or request help sourcing the product.",
     starters: ASSISTANT_STARTERS,
     links: [
       { href: "/shop", label: "Browse the catalogue" },

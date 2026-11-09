@@ -23,3 +23,11 @@ export function isTransientAIError(error: unknown): boolean {
   if (status === 408 || status === 409 || status === 429 || (status && status >= 500)) return true;
   return /timeout|timed out|rate limit|temporar|overload|unavailable|connection|network/i.test(`${value?.name || ""} ${value?.message || ""}`);
 }
+
+/** A short, best-effort per-instance cooldown. Not a shared health registry. */
+export function providerCooldownMs(error: unknown): number {
+  const value = error as { statusCode?: number; status?: number } | null;
+  const status = value?.statusCode ?? value?.status;
+  if (status === 401 || status === 402 || status === 403 || status === 404) return 60_000;
+  return isTransientAIError(error) ? 20_000 : 0;
+}

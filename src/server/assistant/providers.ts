@@ -17,13 +17,15 @@ export function assistantModels(): AssistantModel[] {
       { name: "gateway-secondary", model: gateway(config.secondaryModel) },
     );
   }
-  if (config.profile !== "production" && process.env.GROQ_API_KEY) {
+  // Groq is an additional production fallback after both Gateway models.
+  // Test profile continues to use Groq alone.
+  if (process.env.GROQ_API_KEY?.trim()) {
     const groq = createOpenAICompatible({
       name: "groq",
       baseURL: "https://api.groq.com/openai/v1",
       apiKey: process.env.GROQ_API_KEY,
     });
-    models.push({ name: "groq-test", model: groq.chatModel(config.groqModel) });
+    models.push({ name: "groq-fallback", model: groq.chatModel(config.groqModel) });
   }
   return models;
 }
