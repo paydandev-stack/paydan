@@ -328,9 +328,13 @@ export function answerFor(
   }
 
   // 8. Support.
-  if (
-    /(help|support|contact|human|agent|person|phone|email|call you)/.test(q)
-  ) {
+  const shoppingIntent =
+  /\b(find|search|show|browse|buy|shop|recommend|compare|looking for)\b/.test(q);
+
+if (
+  !shoppingIntent &&
+  /\b(help|support|contact|human|agent|person|email|call you)\b/.test(q)
+) {
     return {
       text: "For an existing order or account question, support can pick it up directly. The help centre covers the common cases first.",
       links: [

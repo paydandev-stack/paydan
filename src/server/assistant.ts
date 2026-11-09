@@ -72,8 +72,7 @@ export async function chatResponse(user: Viewer | null, raw: unknown, abortSigna
               messages: input.messages.map((message) => ({ role: message.role, content: message.text })),
               tools,
               stopWhen: stepCountIs(6),
-              maxOutputTokens: 800,
-              temperature: 0.2,
+              maxOutputTokens: 2048,
               maxRetries: 1,
               abortSignal,
             });
@@ -89,13 +88,25 @@ export async function chatResponse(user: Viewer | null, raw: unknown, abortSigna
             completed = true;
             break;
           } catch (error) {
-            if (emitted) {
+            const err = error as {
+              statusCode?: number;
+              status?: number;
+              message?: string;
+            };
+
+            console.error("[Ask PAYDAN] AI provider failed", {
+              provider: candidate.name,
+              status: err?.statusCode ?? err?.status ?? "unknown",
+              message: err?.message ?? "Unknown provider error",
+            });
+
+  if (emitted) {
               write({ type: "error", message: "The assistant connection ended early. Please retry your message." });
               completed = true;
               break;
             }
             const hasNext = index < models.length - 1;
-            if (!hasNext || !isTransientAIError(error)) break;
+            if (!hasNext) break;
           }
         }
         if (!completed) write({ type: "reply", data: await deterministicReply(user, input) });
