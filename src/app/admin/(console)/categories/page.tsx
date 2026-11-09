@@ -132,7 +132,7 @@ export default function AdminCategoriesPage() {
                         <StatusPill tone="red">18+</StatusPill>
                       ) : null}
                       {category.active === false ? (
-                        <StatusPill tone="gray">Archived</StatusPill>
+                        <StatusPill tone="neutral">Archived</StatusPill>
                       ) : null}
                     </span>
                     <small style={{ display: "block", color: "var(--muted)" }}>
