@@ -13,7 +13,7 @@ function product(id: string, name: string, description: string, categorySlug: st
     brand: "Test",
     highlights: [],
     specifications: {},
-  } as Product;
+  } as unknown as Product;
 }
 
 const catalog = [
