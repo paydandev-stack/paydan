@@ -23,8 +23,10 @@ export type Product = {
   sku: string;
   name: string;
   categorySlug: string;
+  subcategorySlug?: string;
   brand: string;
   images: string[];
+  imageAlts?: Record<string, string>;
   description: string;
   highlights: string[];
   specifications: Record<string, string>;
@@ -63,6 +65,9 @@ export type Category = {
   subcategories: Subcategory[];
   /** Extra filters shown for this department, e.g. storage, size, skin type. */
   facets: string[];
+  shortDescription?: string;
+  homepageVisible?: boolean;
+  homepageOrder?: number;
 };
 
 export type VendorStatus = "active" | "on_hold";
@@ -136,7 +141,11 @@ export type ProcurementStage =
   | "blocked";
 
 export type OrderItem = {
+  /** Immutable identifier for this purchased line. Legacy records are backfilled on read. */
+  lineId?: string;
   productId: string;
+  variantId?: string;
+  sku?: string;
   name: string;
   variantLabel: string;
   image: string;
@@ -259,6 +268,7 @@ export type Banner = {
   ctaLabel: string;
   href: string;
   image: string;
+  altText?: string;
   placement: "hero" | "side";
   active: boolean;
   startAt: string;
@@ -285,6 +295,10 @@ export type ReturnRequest = {
   orderId: string;
   customerId: string;
   productId: string;
+  lineId?: string;
+  variantId?: string;
+  variantLabel?: string;
+  sku?: string;
   productName: string;
   quantity: number;
   reason: string;
@@ -316,6 +330,18 @@ export type AuditEntry = {
   action: string;
   record: string;
   at: string;
+  capability?: string;
+  source?: "admin" | "customer" | "worker" | "webhook";
+};
+
+export type Notification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string;
+  createdAt: string;
+  readAt?: string;
 };
 
 export type CustomerSession = {
@@ -345,6 +371,8 @@ export type StoreSettings = {
   businessHours: string;
   currency: "NGN";
   announcement: string;
+  orderNotificationEmail?: string;
+  supportNotificationEmail?: string;
   paystackStatus: "not_connected" | "test_placeholder";
   transferEnabled: boolean;
 };
@@ -359,6 +387,7 @@ export type Toast = {
 };
 
 export type DemoState = {
+  dataScope: "production" | "test";
   products: Product[];
   categories: Category[];
   vendors: Vendor[];
@@ -376,6 +405,8 @@ export type DemoState = {
   savedForLater: CartLine[];
   addresses: Address[];
   audit: AuditEntry[];
+  notifications: Notification[];
+  recentlyViewed: string[];
   customerSession: CustomerSession;
   adminSession: AdminSession;
   location: { state: string; city: string };

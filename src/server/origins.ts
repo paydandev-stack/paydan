@@ -25,14 +25,29 @@ function origin(value: string, label: string): string {
 export function trustedOrigins(): string[] {
   const values: Array<[string | undefined, string]> = [
     [process.env.BETTER_AUTH_URL, "BETTER_AUTH_URL"],
-    ...((process.env.BETTER_AUTH_TRUSTED_ORIGINS || "")
+    ...(process.env.BETTER_AUTH_TRUSTED_ORIGINS || "")
       .split(",")
-      .map((value, index) => [value || undefined, `BETTER_AUTH_TRUSTED_ORIGINS[${index}]`] as [string | undefined, string])),
-    [process.env.VERCEL_PROJECT_PRODUCTION_URL, "VERCEL_PROJECT_PRODUCTION_URL"],
+      .map(
+        (value, index) =>
+          [value || undefined, `BETTER_AUTH_TRUSTED_ORIGINS[${index}]`] as [
+            string | undefined,
+            string,
+          ],
+      ),
+    [
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+      "VERCEL_PROJECT_PRODUCTION_URL",
+    ],
     [process.env.VERCEL_URL, "VERCEL_URL"],
     [process.env.VERCEL_BRANCH_URL, "VERCEL_BRANCH_URL"],
   ];
-  return [...new Set(values.filter((entry): entry is [string, string] => Boolean(entry[0]?.trim())).map(([value, label]) => origin(value, label)))];
+  return [
+    ...new Set(
+      values
+        .filter((entry): entry is [string, string] => Boolean(entry[0]?.trim()))
+        .map(([value, label]) => origin(value, label)),
+    ),
+  ];
 }
 
 export function isTrustedOrigin(value: string | null): boolean {

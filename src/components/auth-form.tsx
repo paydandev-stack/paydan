@@ -115,12 +115,7 @@ export function AuthForm({
     <div className="auth-experience">
       <aside className="auth-story">
         <Link href="/" className="auth-brand">
-          <img
-            src="/paydan-logo.png"
-            alt="Paydan"
-            width={3000}
-            height={3223}
-          />
+          <img src="/paydan-logo.png" alt="Paydan" width={3000} height={3223} />
           <span>One place. More possibilities.</span>
         </Link>
         <div>

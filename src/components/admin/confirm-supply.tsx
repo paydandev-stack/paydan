@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Order } from "@/lib/types";
 import { useDemo } from "@/lib/store";
 import { api } from "@/lib/api-client";
+import { hasCapability } from "@/lib/capabilities";
 export function ConfirmSupply({ order }: { order: Order }) {
   const { state, refresh } = useDemo();
   const [vendor, setVendor] = useState("");
@@ -32,9 +33,7 @@ export function ConfirmSupply({ order }: { order: Order }) {
     }
   }
   if (
-    !["Super Admin", "Procurement Manager"].includes(
-      state.adminSession?.role ?? "",
-    ) ||
+    !hasCapability(state.adminSession?.role, "sourcing.write") ||
     !state.sourcing.some((request) => request.convertedOrderId === order.id) ||
     order.paymentStatus !== "pending"
   )

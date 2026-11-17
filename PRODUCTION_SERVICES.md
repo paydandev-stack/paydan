@@ -22,11 +22,24 @@ Resend can send from `orders@updates.paydan.store` when `updates.paydan.store` i
 
 Configure the Resend webhook URL as `/api/webhooks/resend`. Subscribe to delivered, delayed, bounced, and complained events. Vercel invokes `/api/cron/mail` and supplies `Authorization: Bearer $CRON_SECRET`.
 
+Schedule all protected worker routes: `/api/cron/mail` every minute for the outbox, `/api/cron/payments` every five minutes for Paystack payment/refund reconciliation, and `/api/cron/media` daily for finalized catalogue orphan cleanup. If the Vercel plan cannot provide the required frequency, use an external scheduler with the same bearer secret. Every route uses an advisory lock and records a sanitized `worker_run`; confirm recent successful runs on **Admin → Jobs & recovery**.
+
+Keep `SITE_INDEXING_ENABLED=false` for previews and during production acceptance. Set `POLICIES_APPROVED_VERSION=2026-10` only after the client approves that exact policy version, then enable indexing after the Admin launch-readiness checklist passes.
+
+After observing each complete staging journey, record its ISO timestamp in `GOOGLE_OAUTH_ACCEPTED_AT`, `STORAGE_ACCEPTED_AT`, `PAYSTACK_ACCEPTED_AT`, `EMAIL_ACCEPTED_AT`, or `AI_ACCEPTED_AT`. These are acceptance evidence flags, not substitutes for credentials; the launch checklist requires both configuration and the relevant observed test.
+
 ## Ask PAYDAN
 
-Production uses `AI_PROVIDER_PROFILE=production`: AI Gateway primary, then AI Gateway secondary, then the deterministic assistant. Vercel OIDC can authenticate Gateway automatically; `AI_GATEWAY_API_KEY` is useful outside Vercel. Direct Groq is accepted only in non-production profiles:
+Production uses this bounded route:
 
-- `AI_PROVIDER_PROFILE=test`: Groq, then deterministic fallback.
-- `AI_PROVIDER_PROFILE=test-last`: Gateway primary, Gateway secondary, Groq, then deterministic fallback.
+1. One Vercel AI Gateway request using `AI_PRIMARY_MODEL=reflection/beam-free` with native fallback to `AI_SECONDARY_MODEL=humansand/ampersand-v0.1`.
+2. Direct Groq using `GROQ_MODEL=openai/gpt-oss-20b` only when the entire Gateway request fails before output with a timeout, network error, `408`, `429`, or provider `5xx`.
+3. The deterministic PAYDAN catalogue/search/support assistant when external providers remain unavailable or are misconfigured.
+
+Set `AI_PROVIDER_TIMEOUT_MS=12000`. Vercel OIDC can authenticate Gateway on Vercel; `AI_GATEWAY_API_KEY` is useful outside Vercel. `GROQ_API_KEY` is independent from Gateway and must be stored only in Vercel project secrets or a gitignored local environment file.
+
+PAYDAN does not fail over after text, a tool call, or a tool result has reached the client, preventing duplicate cart proposals and mixed-provider replies. It also does not fail over on invalid requests, authorization/authentication failures, malformed tools, or browser cancellation. Logs contain provider/model, latency, token usage, status and a sanitized failure class—not prompts, provider response bodies, secrets or customer PII.
+
+The earlier Groq key was exposed during local inspection. Revoke it before production use, generate a new key, and save the replacement only in the Vercel environment dashboard and a gitignored local file. Do not add `AI_GROQ_*` or `AI_TEST_GROQ_*`; those legacy names are rejected.
 
 The assistant never writes the cart directly. It stores a short-lived proposal that the signed-in user must explicitly confirm.

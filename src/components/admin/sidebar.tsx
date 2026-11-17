@@ -39,6 +39,9 @@ export const adminNav: NavGroup[] = [
     label: "Insight",
     items: [
       { href: "/admin/analytics", label: "Analytics" },
+      { href: "/admin/audit", label: "Audit trail" },
+      { href: "/admin/operations", label: "Jobs & recovery" },
+      { href: "/admin/launch", label: "Launch readiness" },
       { href: "/admin/settings", label: "Settings" },
     ],
   },
@@ -149,37 +152,67 @@ export function AdminMobileNav() {
 
   return (
     <>
-    <button type="button" className="admin-mobile-trigger" onClick={() => setOpen(true)} aria-expanded={open}>
-      <span><small>PAYDAN operations</small><strong>{flatNav.find((item) => item.href === active)?.label || "Menu"}</strong></span><b aria-hidden="true">☰</b>
-    </button>
-    <nav className={`admin-mobile-nav${open ? " open" : ""}`} aria-label="Admin sections">
-      <header><strong>Operations menu</strong><button type="button" onClick={() => setOpen(false)} aria-label="Close operations menu">×</button></header>
-      {flatNav
-        .filter((item) => session && canAccessAdmin(session.role, item.href))
-        .map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={active === item.href ? "active" : undefined}
-            aria-current={active === item.href ? "page" : undefined}
+      <button
+        type="button"
+        className="admin-mobile-trigger"
+        onClick={() => setOpen(true)}
+        aria-expanded={open}
+      >
+        <span>
+          <small>PAYDAN operations</small>
+          <strong>
+            {flatNav.find((item) => item.href === active)?.label || "Menu"}
+          </strong>
+        </span>
+        <b aria-hidden="true">☰</b>
+      </button>
+      <nav
+        className={`admin-mobile-nav${open ? " open" : ""}`}
+        aria-label="Admin sections"
+      >
+        <header>
+          <strong>Operations menu</strong>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close operations menu"
           >
-            {item.label}
-          </Link>
-        ))}
-      {session ? (
+            ×
+          </button>
+        </header>
+        {flatNav
+          .filter((item) => session && canAccessAdmin(session.role, item.href))
+          .map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={active === item.href ? "active" : undefined}
+              aria-current={active === item.href ? "page" : undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        {session ? (
+          <button
+            type="button"
+            onClick={() => {
+              actions.signOutAdmin();
+            }}
+          >
+            Sign out
+          </button>
+        ) : (
+          <Link href="/admin/login">Sign in</Link>
+        )}
+      </nav>
+      {open ? (
         <button
           type="button"
-          onClick={() => {
-            actions.signOutAdmin();
-          }}
-        >
-          Sign out
-        </button>
-      ) : (
-        <Link href="/admin/login">Sign in</Link>
-      )}
-    </nav>
-    {open ? <button type="button" className="admin-mobile-backdrop" onClick={() => setOpen(false)} aria-label="Close operations menu" /> : null}
+          className="admin-mobile-backdrop"
+          onClick={() => setOpen(false)}
+          aria-label="Close operations menu"
+        />
+      ) : null}
     </>
   );
 }

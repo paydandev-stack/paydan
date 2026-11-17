@@ -20,11 +20,13 @@ type VariantRow = {
   price: string;
   availability: Availability;
   sku: string;
+  options: string;
 };
 type ProductForm = {
   name: string;
   sku: string;
   categorySlug: string;
+  subcategorySlug: string;
   brand: string;
   description: string;
   price: string;
@@ -37,6 +39,7 @@ type ProductForm = {
   newArrival: boolean;
   restricted: boolean;
   highlights: string;
+  specifications: string;
   variants: VariantRow[];
 };
 function rowKey(): string {
@@ -47,6 +50,19 @@ function parseAmount(value: string): number | null {
   if (!trimmed) return null;
   const amount = Number(trimmed);
   return Number.isFinite(amount) ? amount : null;
+}
+function parsePairs(value: string) {
+  return Object.fromEntries(
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [key, ...rest] = line.split(":");
+        return [key.trim(), rest.join(":").trim()];
+      })
+      .filter(([key, value]) => key && value),
+  );
 }
 /** Labeled select built from the same vocabulary as AdminTextField. */
 function SelectField({
@@ -117,6 +133,7 @@ export default function AdminNewProductPage() {
     name: "",
     sku: "",
     categorySlug: state.categories[0]?.slug ?? "",
+    subcategorySlug: "",
     brand: "",
     description: "",
     price: "",
@@ -129,6 +146,7 @@ export default function AdminNewProductPage() {
     newArrival: false,
     restricted: false,
     highlights: "",
+    specifications: "",
     variants: [],
   });
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
@@ -204,7 +222,7 @@ export default function AdminNewProductPage() {
             id: `${id}-v${index + 1}`,
             sku: row.sku.trim() || `${sku}-${index + 1}`,
             label: row.label.trim(),
-            options: {},
+            options: parsePairs(row.options),
             price: parseAmount(row.price) as number,
             availability: row.availability,
           }))
@@ -224,14 +242,16 @@ export default function AdminNewProductPage() {
         sku,
         name,
         categorySlug: form.categorySlug,
+        subcategorySlug: form.subcategorySlug || undefined,
         brand,
         images: uploadedImages,
+        imageAlts: Object.fromEntries(uploadedImages.map((url) => [url, name])),
         description: form.description.trim(),
         highlights: form.highlights
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
-        specifications: {},
+        specifications: parsePairs(form.specifications),
         price,
         compareAt:
           compareAt !== null && compareAt > price ? compareAt : undefined,
@@ -302,11 +322,28 @@ export default function AdminNewProductPage() {
               <SelectField
                 label="Category"
                 value={form.categorySlug}
-                onChange={(value) => set("categorySlug", value)}
+                onChange={(value) => {
+                  set("categorySlug", value);
+                  set("subcategorySlug", "");
+                }}
                 options={state.categories.map((item) => ({
                   value: item.slug,
                   label: item.name,
                 }))}
+              />
+              <SelectField
+                label="Subcategory"
+                value={form.subcategorySlug}
+                onChange={(value) => set("subcategorySlug", value)}
+                options={[
+                  { value: "", label: "No subcategory" },
+                  ...(state.categories
+                    .find((item) => item.slug === form.categorySlug)
+                    ?.subcategories.map((item) => ({
+                      value: item.slug,
+                      label: item.name,
+                    })) ?? []),
+                ]}
               />
               <SelectField
                 label="Supplying vendor"
@@ -377,6 +414,14 @@ export default function AdminNewProductPage() {
                 value={form.description}
                 onChange={(event) => set("description", event.target.value)}
               />
+              <AdminTextArea
+                wide
+                label="Specifications"
+                rows={5}
+                value={form.specifications}
+                onChange={(event) => set("specifications", event.target.value)}
+                hint="One per line as Label: Value."
+              />
             </div>
           </section>
 
@@ -424,7 +469,7 @@ export default function AdminNewProductPage() {
                 key={row.key}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.4fr .8fr 1fr 1fr auto",
+                  gridTemplateColumns: "1.2fr .8fr 1fr 1fr 1.4fr auto",
                   gap: ".6rem",
                   alignItems: "end",
                   marginBottom: ".6rem",
@@ -470,6 +515,23 @@ export default function AdminNewProductPage() {
                     setRow(row.key, { sku: event.target.value })
                   }
                 />
+                <AdminTextField
+                  label="Options"
+                  value={row.options}
+                  placeholder="Colour: Black"
+                  hint={
+                    state.categories.find(
+                      (item) => item.slug === form.categorySlug,
+                    )?.facets.length
+                      ? `Facets: ${state.categories
+                          .find((item) => item.slug === form.categorySlug)!
+                          .facets.join(", ")}`
+                      : "One per line as Label: Value"
+                  }
+                  onChange={(event) =>
+                    setRow(row.key, { options: event.target.value })
+                  }
+                />
                 <button
                   type="button"
                   className="admin-btn quiet"
@@ -501,6 +563,7 @@ export default function AdminNewProductPage() {
                       price: "",
                       availability: "in_stock",
                       sku: "",
+                      options: "",
                     },
                   ],
                 }))

@@ -23,13 +23,31 @@ const groups: Record<string, string[]> = {
     "RESEND_WEBHOOK_SECRET",
     "CRON_SECRET",
   ],
-  AI: ["AI_PROVIDER_PROFILE", "AI_PRIMARY_MODEL", "AI_SECONDARY_MODEL"],
+  AI: [
+    "AI_PROVIDER_PROFILE",
+    "AI_PROVIDER_TIMEOUT_MS",
+    "AI_PRIMARY_MODEL",
+    "AI_SECONDARY_MODEL",
+  ],
 };
 const optional: Record<string, string[]> = {
   Authentication: ["BETTER_AUTH_TRUSTED_ORIGINS"],
-  Storage: ["S3_ENDPOINT", "S3_PUBLIC_ENDPOINT", "S3_FORCE_PATH_STYLE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+  Storage: [
+    "S3_ENDPOINT",
+    "S3_PUBLIC_ENDPOINT",
+    "S3_FORCE_PATH_STYLE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+  ],
   AI: ["AI_GATEWAY_API_KEY", "GROQ_API_KEY", "GROQ_MODEL"],
 };
+const legacyAiVariables = [
+  "AI_GROQ_API_KEY",
+  "AI_GROQ_MODEL",
+  "AI_GROQ_BASE_URL",
+  "AI_TEST_GROQ_ENABLED",
+  "AI_TEST_GROQ_MODE",
+].filter((key) => process.env[key]?.trim());
 let missing = false;
 for (const [group, keys] of Object.entries(groups)) {
   const absent = keys.filter((key) => !process.env[key]);
@@ -53,7 +71,25 @@ if (
     .toString("utf8")
     .includes("PRIVATE KEY")
 ) {
-  console.log("Private media delivery: CLOUDFRONT_PRIVATE_KEY_BASE64 must decode to a PEM private key.");
+  console.log(
+    "Private media delivery: CLOUDFRONT_PRIVATE_KEY_BASE64 must decode to a PEM private key.",
+  );
+  missing = true;
+}
+if (legacyAiVariables.length) {
+  console.log(
+    `AI: remove legacy variables and use GROQ_API_KEY/GROQ_MODEL: ${legacyAiVariables.join(", ")}.`,
+  );
+  missing = true;
+}
+const aiTimeout = Number(process.env.AI_PROVIDER_TIMEOUT_MS);
+if (
+  process.env.AI_PROVIDER_TIMEOUT_MS &&
+  (!Number.isInteger(aiTimeout) || aiTimeout < 1000 || aiTimeout > 60000)
+) {
+  console.log(
+    "AI: AI_PROVIDER_TIMEOUT_MS must be an integer from 1000 to 60000.",
+  );
   missing = true;
 }
 process.exitCode = missing ? 1 : 0;

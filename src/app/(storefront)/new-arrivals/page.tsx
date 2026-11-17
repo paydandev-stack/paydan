@@ -27,6 +27,7 @@ export default function NewArrivalsPage() {
       description="Recently published products across Paydan's departments. Availability follows each supplier, so some items are confirmed after you order."
       products={newcomers}
       departments={departments}
+      serverQuery={{ collection: "new-arrivals" }}
       emptyTitle="Nothing new published yet"
       emptyMessage="New products appear here as soon as they are published from the admin catalogue."
     />

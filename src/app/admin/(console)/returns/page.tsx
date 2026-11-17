@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { api } from "@/lib/api-client";
+import { hasCapability } from "@/lib/capabilities";
 type Refund = {
   id: string;
   return_id: string;
@@ -11,8 +12,9 @@ type Refund = {
 };
 export default function Returns() {
   const { state, refresh } = useDemo();
-  const canRefund = ["Super Admin", "Order Manager"].includes(
-    state.adminSession?.role ?? "",
+  const canRefund = hasCapability(
+    state.adminSession?.role,
+    "refunds.issue",
   );
   const [note, setNote] = useState<Record<string, string>>({});
   const [refunds, setRefunds] = useState<Refund[]>([]);

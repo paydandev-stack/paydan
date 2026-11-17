@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -28,6 +28,7 @@ export default function AdminSourcingRequestsPage() {
   const { state } = useDemo();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<string>(ALL);
+  const [visibleCount, setVisibleCount] = useState(50);
 
   const sorted = [...state.sourcing].sort((a, b) =>
     a.submittedAt < b.submittedAt ? 1 : -1,
@@ -42,6 +43,8 @@ export default function AdminSourcingRequestsPage() {
     const matchesStatus = status === ALL || request.status === status;
     return matchesQuery && matchesStatus;
   });
+  useEffect(() => setVisibleCount(50), [query, status]);
+  const visibleRequests = visible.slice(0, visibleCount);
 
   const openQueue = sorted.filter(
     (request) =>
@@ -185,7 +188,7 @@ export default function AdminSourcingRequestsPage() {
           head={["Request", "Product", "Customer", "Assignee", "Status"]}
           caption={`${plural(visible.length, "sourcing request")} matching the current filters`}
         >
-          {visible.map((request) => (
+          {visibleRequests.map((request) => (
             <div className="table-row" key={request.id}>
               <span>
                 <Link
@@ -208,6 +211,17 @@ export default function AdminSourcingRequestsPage() {
           ))}
         </AdminTable>
       )}
+      {visibleRequests.length < visible.length ? (
+        <div className="admin-actions" style={{ justifyContent: "center" }}>
+          <button
+            className="admin-btn quiet"
+            type="button"
+            onClick={() => setVisibleCount((count) => count + 50)}
+          >
+            Load 50 more requests
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

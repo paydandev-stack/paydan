@@ -2,7 +2,6 @@
 
 > Implementation update — 6 November 2026: PostgreSQL, AWS S3, Google-only OAuth and Paystack are implemented in this application. AI is provider-configurable but intentionally unconfigured. Read `docs/CONTEXT_AND_HANDOFF.md`, `docs/implementation-progress.md`, `docs/USER_FLOW_REVIEW.md` and `SETUP_AND_OPERATIONS.md` for the linked history, delivered scope, validation and required external setup. The specification below is a target, not proof that live integrations have been tested.
 
-
 Prepared 4 November 2026. This document consolidates the client requirements and the agreed direction. It is a build brief, not a claim that the features are already implemented.
 
 ## 1. Product and scope
@@ -17,21 +16,21 @@ Primary journey:
 
 ## 2. Decisions and configuration assumptions
 
-| Item | Status and direction |
-|---|---|
-| Homepage appearance | Approved; retain with targeted changes |
-| Homepage product prices | Never display, including to signed-in visitors |
-| Anonymous prices | Never disclose through pages, search, chat, metadata, or public responses |
-| Purchase access | Requires authentication; anonymous visitors may retain an unpriced selection draft |
-| Member dashboard | Shopping-first, with departments, listings, prices, and personal context |
-| Authentication | Email/password plus an OAuth provider button |
-| OAuth provider | Google is the proposed first provider, not a confirmed client choice |
-| AI access | Anonymous discovery; authenticated shopping and own-account assistance |
-| Chat availability | Every application-owned page; mobile-safe and persistent across navigation |
-| Database | External database confirmed; PostgreSQL recommended, provider/engine still to be supplied |
-| Files/media | S3 bucket confirmed; AWS versus S3-compatible endpoint still to be supplied |
-| Payments | Paystack confirmed by the client; use it for checkout payments |
-| Email, AI provider, deployment | Select/configure during implementation; no credentials assumed |
+| Item                           | Status and direction                                                                      |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| Homepage appearance            | Approved; retain with targeted changes                                                    |
+| Homepage product prices        | Never display, including to signed-in visitors                                            |
+| Anonymous prices               | Never disclose through pages, search, chat, metadata, or public responses                 |
+| Purchase access                | Requires authentication; anonymous visitors may retain an unpriced selection draft        |
+| Member dashboard               | Shopping-first, with departments, listings, prices, and personal context                  |
+| Authentication                 | Email/password plus an OAuth provider button                                              |
+| OAuth provider                 | Google is the proposed first provider, not a confirmed client choice                      |
+| AI access                      | Anonymous discovery; authenticated shopping and own-account assistance                    |
+| Chat availability              | Every application-owned page; mobile-safe and persistent across navigation                |
+| Database                       | External database confirmed; PostgreSQL recommended, provider/engine still to be supplied |
+| Files/media                    | S3 bucket confirmed; AWS versus S3-compatible endpoint still to be supplied               |
+| Payments                       | Paystack confirmed by the client; use it for checkout payments                            |
+| Email, AI provider, deployment | Select/configure during implementation; no credentials assumed                            |
 
 The application can be built and tested with documented development services before production credentials are available. Missing credentials must never produce fake success or a silent production fallback to sample data.
 
@@ -74,16 +73,16 @@ New accounts receive useful neutral collections and optional preferences; return
 
 Working label: **Ask PAYDAN**. A floating icon opens a large desktop panel with optional expansion and a full-screen mobile conversation. Retain the thread across navigation; do not auto-open on every page. Provide close, minimize, new conversation, accessible focus handling, and clear AI identification.
 
-| Capability | Anonymous | Authenticated customer |
-|---|---|---|
-| Explain PAYDAN, policies, departments, collections | Yes | Yes |
-| Find and compare published products | Specifications only; no prices | Current prices and budget comparisons |
-| Prepare a shopping list | Unpriced draft | Priced selection |
-| Mutate saved cart | No; sign-in handoff | Yes, on explicit request |
-| Submit sourcing inquiry | Draft only | Yes, after reviewing details |
-| Read orders, addresses, quotes | No | Own records only |
-| Checkout | Sign-in handoff | Standard review/payment flow |
-| Manage suppliers, staff, margins, refunds | No | No |
+| Capability                                         | Anonymous                      | Authenticated customer                |
+| -------------------------------------------------- | ------------------------------ | ------------------------------------- |
+| Explain PAYDAN, policies, departments, collections | Yes                            | Yes                                   |
+| Find and compare published products                | Specifications only; no prices | Current prices and budget comparisons |
+| Prepare a shopping list                            | Unpriced draft                 | Priced selection                      |
+| Mutate saved cart                                  | No; sign-in handoff            | Yes, on explicit request              |
+| Submit sourcing inquiry                            | Draft only                     | Yes, after reviewing details          |
+| Read orders, addresses, quotes                     | No                             | Own records only                      |
+| Checkout                                           | Sign-in handoff                | Standard review/payment flow          |
+| Manage suppliers, staff, margins, refunds          | No                             | No                                    |
 
 The same retail assistant may remain available on admin routes to satisfy the all-pages requirement, but staff status does not grant it internal management tools. A separate operations assistant is outside scope.
 
@@ -93,7 +92,7 @@ Answers use current published catalogue and approved knowledge. Product suggesti
 
 Ask whether a budget includes delivery. Offer alternatives or a sourcing request when appropriate. Do not invent products, stock, prices, delivery promises, or policy terms. Never collect card details or passwords through chat. AI outages fall back to normal search and support.
 
-Production AI uses two ordered model-vendor slots through Vercel AI Gateway: an evaluated primary and a different secondary fallback. Local development and Vercel Preview may use a separate direct Groq free-plan profile with synthetic data; the application must reject that test profile in Production. After all providers permitted by the active profile fail, use the deterministic normal-search/support experience. Keep Gateway and Groq credentials server-only, apply bounded failover without replaying mutations, and record sanitized provider/model telemetry.
+Production AI sends one compound Vercel AI Gateway request: `reflection/beam-free`, with Gateway-native fallback to `humansand/ampersand-v0.1`. Direct Groq using `openai/gpt-oss-20b` is independent and runs only after an eligible transient pre-output Gateway failure. After both external services are unavailable, use the deterministic normal-search/support experience. Keep Gateway and Groq credentials server-only, never fail over after text/tool output, never replay mutations, and record only sanitized provider/model telemetry.
 
 ## 7. Remaining commerce and operations
 

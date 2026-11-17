@@ -7,7 +7,9 @@ export async function POST(request: Request) {
     if (process.env.DATABASE_URL)
       await limit(
         `chat:${user?.id ?? guestAssistantKey(request)}`,
-        user ? Number(process.env.ASSISTANT_RATE_LIMIT_USER || 30) : Number(process.env.ASSISTANT_RATE_LIMIT_GUEST || 12),
+        user
+          ? Number(process.env.ASSISTANT_RATE_LIMIT_USER || 30)
+          : Number(process.env.ASSISTANT_RATE_LIMIT_GUEST || 12),
       );
     return chatResponse(user, await body(request), request.signal);
   } catch (error) {

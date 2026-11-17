@@ -1,40 +1,43 @@
 # PAYDAN implementation status
 
-Updated 7 November 2026. This replaces the earlier fixture-only completion report. See `SETUP_AND_OPERATIONS.md` in the application root for configuration and deployment requirements.
+Updated 16 November 2026. This file records the delivered application behavior. Provider configuration and deployment procedures remain in `SETUP_AND_OPERATIONS.md` and `PRODUCTION_SERVICES.md`.
 
-The cross-session chronology and Claude/Codex handoff are consolidated in
-`docs/CONTEXT_AND_HANDOFF.md`. Use this status file for delivered behavior and
-that handoff file for how the different implementation passes connect.
+## Delivered
 
-## Implemented
-
-| Area                  | Delivered                                                                                                                                                                  |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Approved storefront   | Homepage composition retained, product cards price-free for everyone, technology department corrected, subtle reveals and reduced-motion support                           |
-| Public data boundary  | Sanitized anonymous catalogue, dedicated CDN-cacheable price-free payload, no customer/order/vendor records or price/cost fields in public responses                       |
-| Identity              | PostgreSQL-backed Better Auth, verified email/password, reset, Google-only OAuth, explicit account linking, real session and role checks                                   |
-| Shopping flow         | Dashboard-first sign-in, personal shortcuts, departments and products, expiring validated selection intent and idempotent cart resume                                      |
-| Account               | Durable cart, wishlist, addresses, own orders/tracking, sourcing and quotes, returns; private state clears on sign-out/account change                                      |
-| Authentication design | Split green/orange layout, Google button, verification and reset pages                                                                                                     |
-| Chat                  | Global launcher, desktop expansion/minimize, full-screen mobile focus isolation, owner-specific history, authorized model adapter, explicit cart proposals and shared cart |
-| PostgreSQL            | Versioned migrations, owner-indexed records, payment/refund/stock tables, transactions and idempotency receipts                                                            |
-| AWS S3/CDN            | Private bucket adapter, constrained uploads, immutable WebP catalog objects, optional direct CloudFront delivery, authorized private attachments                           |
-| Paystack              | Server totals, supplier/stock gate, initialization, verification, signed webhooks, duplicate protection, reconciliation, approved return refunds                           |
-| Operations            | Server-enforced staff roles, category and shipping creation, inventory, procurement confirmation, returns/refunds, support inbox, configured-service status                |
-| Notifications         | Durable email outbox for identity/order/quote/support events, retrying SMTP worker                                                                                         |
-| Recovery              | Payment pending/failed/uncertain handling, authoritative total review, validation errors, unavailable-service messages and route error screens                             |
-| Handover              | Environment template, setup/runbook, automated commerce tests and HTTP smoke script                                                                                        |
+| Area                | Current implementation                                                                                                                                                                                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Catalogue authority | PostgreSQL departments govern homepage, navigation, catalogue, search, Ask PAYDAN, cart and checkout visibility. Archived or restricted departments block discovery and purchase while historical order lines remain readable.                                                                |
+| Catalogue scale     | Shop, category, search, deals and new-arrivals use an opaque-cursor server endpoint with server-side filters and sorts. Guest DTOs contain no prices; member responses are private. The shared merchandising snapshot is capped and retains account-referenced items.                         |
+| Product model       | Department subcategories/facets, structured specifications, variant options, image ordering/alt text/primary selection, slug validation, and trigger-backed product/variant SKU uniqueness are implemented. A recorded media worker removes catalogue objects left unreferenced for 24 hours. |
+| Staff authorization | One capability map drives admin paths, navigation, visible controls, commands and specialized APIs. Supplier writes, support notes, fulfilment, refunds, settings, jobs and catalogue writes are independently enforced on the server.                                                        |
+| Operations          | Protected mail, payment/refund and media cron routes use advisory locks and durable worker-run records. Jobs & recovery shows queues, dead mail, payment/refund exceptions, recent runs, safe manual reconciliation, dead-mail retry and orphan cleanup.                                      |
+| Returns and refunds | New and backfilled orders have immutable line identifiers and SKU/variant snapshots. Return limits and refund amounts resolve the exact order line; ambiguous legacy returns require staff review and duplicate Paystack refunds remain blocked.                                              |
+| Merchandising       | Hero CTA links, side banners, alt text, schedule validation, homepage departments, featured/new-arrival collections, storefront identity/contact settings and internal operations recipients are database-controlled. Public cache invalidation follows catalogue/settings writes.            |
+| Test buyer          | Test products, orders, sourcing, returns, support and notifications use test-owned record kinds. External mail, Paystack and production operational alerts are suppressed; the dashboard is labelled demonstration data and can be reset to the current fixture version.                      |
+| Analytics and audit | Analytics separates gross paid revenue, processed refunds, net revenue, pending payment value, sourcing conversion and return rate, with a date filter. Audit records include actor/capability/source, support cursor pagination and sanitized CSV export.                                    |
+| Buyer account       | Dashboard attention items, recently viewed, buy-again, saved finds, active orders, durable notification read state and append-only support conversations are connected to account-owned server data.                                                                                          |
+| Connected services  | Health states distinguish unconfigured, configured, verified, degraded and failing. Safe checks cover PostgreSQL, S3, SMTP, Paystack and CloudFront. Explicit acceptance timestamps prevent configuration alone from passing launch readiness.                                                |
+| Launch controls     | A Super Admin checklist covers content, inventory, support, policy approval, providers, workers and unresolved alerts. Robots and sitemap output are environment controlled; product sitemap entries remain price-free.                                                                       |
 
 ## Verification
 
-The checked-in `tests/commerce.test.ts` suite contains 21 integration/regression cases. It uses PGlite with the real commerce SQL and Better Auth schema/session behavior; payment and model HTTP responses are controlled test fixtures. It covers anonymous/member data boundaries, ownership and role checks, cart validation/idempotency, origin/redirect protection, quote conversion, supplier/stock gates, payment amount/reference verification, signatures, duplicate payment handling, stock release/oversell prevention, CloudFront catalog URL isolation, private media ownership and verified refunds.
+Run these checks after every migration or deployment candidate:
 
-Browser checks during implementation covered the public homepage and technology cards, split login page, global chat on authentication pages, honest missing-AI response, mobile full-screen chat, focus isolation/return, and anonymous tracking gate. There is no prior baseline screenshot set, and a full signed-in responsive/browser sweep remains part of staging acceptance.
+```powershell
+npm test
+npm run typecheck
+npm run build
+git diff --check
+```
 
-See `docs/USER_FLOW_REVIEW.md` for the completed flow and its acceptance boundaries. Final command results are recorded there after verification.
+The current automated suite exercises the real commerce migrations in PGlite, Better Auth behavior, price/privacy boundaries, capability and catalogue-visibility rules, database SKU uniqueness, public catalogue pagination/detail projection, test-notification isolation, cart and checkout integrity, Paystack verification/idempotency, exact-line returns/refunds, CloudFront media boundaries, origin protection and AI-provider routing.
 
-## External setup still required
+## External acceptance still required
 
-The supplied Neon database in AWS London (`eu-west-2`) was connected and the two versioned PAYDAN migrations plus Better Auth schema were applied on 7 November 2026. No real payment, email, S3 upload, CloudFront distribution or OAuth login was performed. Configure Google, AWS S3/CloudFront, SMTP and Paystack, schedule the workers, then run the staging acceptance checks in the runbook. The AI provider is intentionally unselected; the model adapter is implemented but live chat is unavailable until configured and tested.
+`migrations/006_operational_completion.sql` must be applied once with the unpooled production Neon connection before deploying this build. The migration is forward-only and adds SKU enforcement, operational indexes, worker runs, notifications, support conversations and legacy order-line backfill.
 
-Business approval is still needed for real catalogue/stock/shipping data and draft policies. Operational limitations are documented: ambiguous payment/refund submissions require reconciliation; sourced failed payments require team handling; the snapshot architecture is intended for the current catalogue scale. Do not interpret route existence or a successful build as live-service certification.
+The application does not mark provider setup as accepted merely because credentials exist. Complete the Google OAuth, S3/CloudFront, Paystack, transactional-email/webhook and Ask PAYDAN staging journeys, then set the corresponding `*_ACCEPTED_AT` ISO timestamps. Schedule mail every minute, payment reconciliation every five minutes and media cleanup daily.
+
+The policy text is intentionally still draft. Replace it with client-approved wording, change each policy status to `Published`, record its approval date, and set `POLICIES_APPROVED_VERSION` to the matching code version. Keep `SITE_INDEXING_ENABLED=false` until the blocking launch checklist passes and the client authorizes indexing.
+
+Real supplier, product, inventory, delivery and support content must be entered through the admin portal. No guessed production price, stock, provider result or policy approval is seeded by this implementation.

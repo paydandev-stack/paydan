@@ -115,11 +115,13 @@ export type PolicyPage = {
   title: string;
   summary: string;
   updated: string;
-  status: "Draft — pending business approval";
+  status: "Draft — pending business approval" | "Published";
+  approvedAt?: string;
   sections: { heading: string; paragraphs: string[] }[];
 };
 
 const draftLabel = "Draft — pending business approval" as const;
+export const POLICY_CONTENT_VERSION = "2026-10";
 
 export const policyPages: PolicyPage[] = [
   {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -38,6 +38,7 @@ export default function AdminOrdersPage() {
   const [query, setQuery] = useState("");
   const [payment, setPayment] = useState(ALL);
   const [fulfilment, setFulfilment] = useState(ALL);
+  const [visibleCount, setVisibleCount] = useState(50);
 
   const sorted = [...state.orders].sort((a, b) =>
     a.placedAt < b.placedAt ? 1 : -1,
@@ -54,6 +55,8 @@ export default function AdminOrdersPage() {
       fulfilment === ALL || order.fulfillmentStatus === fulfilment;
     return matchesQuery && matchesPayment && matchesFulfilment;
   });
+  useEffect(() => setVisibleCount(50), [query, payment, fulfilment]);
+  const visibleOrders = visible.slice(0, visibleCount);
 
   const awaitingPayment = sorted.filter(
     (order) => order.paymentStatus === "pending",
@@ -189,7 +192,7 @@ export default function AdminOrdersPage() {
           head={["Order", "Customer", "Payment", "Fulfilment", "Total"]}
           caption={`${plural(visible.length, "order")} matching the current filters`}
         >
-          {visible.map((order) => (
+          {visibleOrders.map((order) => (
             <div className="table-row" key={order.id}>
               <span>
                 <Link
@@ -216,6 +219,17 @@ export default function AdminOrdersPage() {
           ))}
         </AdminTable>
       )}
+      {visibleOrders.length < visible.length ? (
+        <div className="admin-actions" style={{ justifyContent: "center" }}>
+          <button
+            className="admin-btn quiet"
+            type="button"
+            onClick={() => setVisibleCount((count) => count + 50)}
+          >
+            Load 50 more orders
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -157,9 +157,14 @@ export function AskPaydan() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || payload.error || "The assistant is unavailable. Please try again.");
+        throw new Error(
+          payload.message ||
+            payload.error ||
+            "The assistant is unavailable. Please try again.",
+        );
       }
-      if (!response.body) throw new Error("The assistant returned no response.");
+      if (!response.body)
+        throw new Error("The assistant returned no response.");
       let reply: Message = { id: assistantId, role: "assistant", text: "" };
       const publish = () => {
         if (currentOwner.current === requestOwner)
@@ -176,15 +181,33 @@ export function AskPaydan() {
         buffer = lines.pop() || "";
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = JSON.parse(line) as { type: string; text?: string; message?: string; data?: Record<string, unknown> };
+          const event = JSON.parse(line) as {
+            type: string;
+            text?: string;
+            message?: string;
+            data?: Record<string, unknown>;
+          };
           if (event.type === "text-delta") reply.text += event.text || "";
-          if (event.type === "reply" && event.data) reply = { ...reply, ...event.data } as Message;
-          if (event.type === "error") throw new Error(event.message || "The assistant connection ended early.");
+          if (event.type === "reply" && event.data)
+            reply = { ...reply, ...event.data } as Message;
+          if (event.type === "error")
+            throw new Error(
+              event.message || "The assistant connection ended early.",
+            );
           if (event.type === "tool-result" && event.data) {
             const data = event.data as Record<string, unknown>;
-            const products = Array.isArray(data.products) ? data.products : data.product ? [data.product] : [];
-            const ids = products.map((product) => String((product as { id?: string }).id || "")).filter(Boolean);
-            if (ids.length) reply.productIds = [...new Set([...(reply.productIds || []), ...ids])].slice(0, 6);
+            const products = Array.isArray(data.products)
+              ? data.products
+              : data.product
+                ? [data.product]
+                : [];
+            const ids = products
+              .map((product) => String((product as { id?: string }).id || ""))
+              .filter(Boolean);
+            if (ids.length)
+              reply.productIds = [
+                ...new Set([...(reply.productIds || []), ...ids]),
+              ].slice(0, 6);
             if (data.kind === "cart-proposal")
               reply.cartProposal = {
                 proposalId: String(data.proposalId),
@@ -192,7 +215,8 @@ export function AskPaydan() {
                 variantId: String(data.variantId),
                 quantity: Number(data.quantity),
               };
-            if (Array.isArray(data.links)) reply.links = data.links as Message["links"];
+            if (Array.isArray(data.links))
+              reply.links = data.links as Message["links"];
             if (data.kind === "auth-required" && typeof data.href === "string")
               reply.links = [{ label: "Sign in to continue", href: data.href }];
           }
@@ -200,7 +224,10 @@ export function AskPaydan() {
         }
         if (done) break;
       }
-      if (!reply.text.trim()) reply.text = reply.productIds?.length ? "Here are the closest matches I found." : "I’ve prepared the next step for you.";
+      if (!reply.text.trim())
+        reply.text = reply.productIds?.length
+          ? "Here are the closest matches I found."
+          : "I’ve prepared the next step for you.";
       publish();
     } catch (error) {
       if (currentOwner.current === requestOwner)
@@ -453,9 +480,7 @@ export function AskPaydan() {
                     </select>
                   </label>
                   <button
-                    disabled={
-                      busy || !message.cartProposal.variantId
-                    }
+                    disabled={busy || !message.cartProposal.variantId}
                     onClick={() => void confirm(message)}
                   >
                     {state.customerSession

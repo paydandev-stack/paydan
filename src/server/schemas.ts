@@ -51,8 +51,10 @@ export const product = z.object({
   sku: short,
   name: short,
   categorySlug: id,
+  subcategorySlug: id.optional(),
   brand: text,
   images: z.array(image).min(1).max(12),
+  imageAlts: z.record(z.string(), text).optional(),
   description: text,
   highlights: z.array(text).max(30),
   specifications: z.record(z.string(), text),
@@ -95,6 +97,9 @@ export const category = z.object({
   restricted: z.boolean(),
   subcategories: z.array(z.object({ slug: id, name: short })).max(100),
   facets: z.array(short).max(30),
+  shortDescription: text.optional(),
+  homepageVisible: z.boolean().optional(),
+  homepageOrder: z.number().int().min(0).optional(),
 });
 export const vendor = z.object({
   id,
@@ -141,19 +146,37 @@ export const team = z.object({
   status: z.enum(["active", "invited", "suspended"]),
   lastActive: text,
 });
-export const banner = z.object({
-  id,
-  title: short,
-  eyebrow: text,
-  subtitle: text,
-  ctaLabel: short,
-  href: z.string().regex(/^\/(?![\/\\])/),
-  image,
-  placement: z.enum(["hero", "side"]),
-  active: z.boolean(),
-  startAt: text,
-  endAt: text,
-});
+export const banner = z
+  .object({
+    id,
+    title: short,
+    eyebrow: text,
+    subtitle: text,
+    ctaLabel: short,
+    href: z.string().regex(/^\/(?![\/\\])/),
+    image,
+    altText: short,
+    placement: z.enum(["hero", "side"]),
+    active: z.boolean(),
+    startAt: text,
+    endAt: text,
+  })
+  .superRefine((value, context) => {
+    const start = Date.parse(value.startAt);
+    const end = Date.parse(value.endAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end))
+      context.addIssue({
+        code: "custom",
+        path: ["startAt"],
+        message: "Use a valid banner schedule.",
+      });
+    else if (end < start)
+      context.addIssue({
+        code: "custom",
+        path: ["endAt"],
+        message: "The banner end must be after its start.",
+      });
+  });
 export const sourcing = z.object({
   customerName: short,
   email: z.email(),

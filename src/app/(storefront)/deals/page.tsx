@@ -33,6 +33,7 @@ export default function DealsPage() {
       }
       products={deals}
       departments={departments}
+      serverQuery={{ collection: "deals" }}
       emptyTitle={
         signedIn
           ? "No discounted products right now"

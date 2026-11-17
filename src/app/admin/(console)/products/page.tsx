@@ -1,7 +1,7 @@
 "use client";
 import Image from "@/components/safe-image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -24,6 +24,7 @@ export default function AdminProductsPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(50);
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
     return state.products.filter((product) => {
@@ -37,6 +38,8 @@ export default function AdminProductsPage() {
       );
     });
   }, [state.products, query, status, category]);
+  useEffect(() => setVisibleCount(50), [query, status, category]);
+  const visibleProducts = filtered.slice(0, visibleCount);
   const published = state.products.filter(
     (product) => product.status === "published",
   );
@@ -151,7 +154,7 @@ export default function AdminProductsPage() {
           ]}
           caption="Products matching the current filters"
         >
-          {filtered.map((product) => {
+          {visibleProducts.map((product) => {
             const margin = marginPercent(product.price, product.costPrice);
             const categoryName =
               state.categories.find(
@@ -263,6 +266,17 @@ export default function AdminProductsPage() {
           })}
         </AdminTable>
       )}
+      {visibleProducts.length < filtered.length ? (
+        <div className="admin-actions" style={{ justifyContent: "center" }}>
+          <button
+            className="admin-btn quiet"
+            type="button"
+            onClick={() => setVisibleCount((count) => count + 50)}
+          >
+            Load 50 more products
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

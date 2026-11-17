@@ -10,6 +10,8 @@ type StorefrontForm = {
   supportPhone: string;
   businessHours: string;
   announcement: string;
+  orderNotificationEmail: string;
+  supportNotificationEmail: string;
 };
 function formFromSettings(settings: {
   storeName: string;
@@ -17,6 +19,8 @@ function formFromSettings(settings: {
   supportPhone: string;
   businessHours: string;
   announcement: string;
+  orderNotificationEmail?: string;
+  supportNotificationEmail?: string;
 }): StorefrontForm {
   return {
     storeName: settings.storeName,
@@ -24,6 +28,8 @@ function formFromSettings(settings: {
     supportPhone: settings.supportPhone,
     businessHours: settings.businessHours,
     announcement: settings.announcement,
+    orderNotificationEmail: settings.orderNotificationEmail ?? "",
+    supportNotificationEmail: settings.supportNotificationEmail ?? "",
   };
 }
 /**
@@ -48,7 +54,9 @@ export default function AdminStorefrontSettingsPage() {
     form.supportEmail !== settings.supportEmail ||
     form.supportPhone !== settings.supportPhone ||
     form.businessHours !== settings.businessHours ||
-    form.announcement !== settings.announcement;
+    form.announcement !== settings.announcement ||
+    form.orderNotificationEmail !== (settings.orderNotificationEmail ?? "") ||
+    form.supportNotificationEmail !== (settings.supportNotificationEmail ?? "");
   function update<K extends keyof StorefrontForm>(key: K, value: string) {
     setForm((current) => ({ ...current, [key]: value }));
   }
@@ -63,12 +71,26 @@ export default function AdminStorefrontSettingsPage() {
         setError("Enter a valid support email address.");
         return;
       }
+      if (!/^\+?[0-9 ()-]{7,25}$/.test(form.supportPhone.trim())) {
+        setError("Enter a valid support phone number.");
+        return;
+      }
+      for (const value of [
+        form.orderNotificationEmail,
+        form.supportNotificationEmail,
+      ])
+        if (value && !value.includes("@")) {
+          setError("Enter valid operational notification email addresses.");
+          return;
+        }
       await actions.updateSettings({
         storeName: form.storeName.trim(),
         supportEmail: form.supportEmail.trim(),
         supportPhone: form.supportPhone.trim(),
         businessHours: form.businessHours.trim(),
         announcement: form.announcement.trim(),
+        orderNotificationEmail: form.orderNotificationEmail.trim(),
+        supportNotificationEmail: form.supportNotificationEmail.trim(),
       });
       actions.notify("Storefront settings saved");
       setError("");
@@ -83,7 +105,7 @@ export default function AdminStorefrontSettingsPage() {
       <AdminPageHeader
         eyebrow="Settings · Storefront"
         title="Storefront"
-        description={`${settings.storeName} · announcement, support contact and business hours · saved to this browser`}
+        description={`${settings.storeName} · announcement, support contact and business hours · stored centrally in PostgreSQL`}
         action={
           <Link className="admin-btn ghost" href="/admin/settings">
             All settings
@@ -138,6 +160,24 @@ export default function AdminStorefrontSettingsPage() {
                 value={form.announcement}
                 onChange={(event) => update("announcement", event.target.value)}
                 hint="Rendered as plain text in the dark strip above the storefront navigation."
+              />
+              <AdminTextField
+                label="Order operations email"
+                type="email"
+                value={form.orderNotificationEmail}
+                onChange={(event) =>
+                  update("orderNotificationEmail", event.target.value)
+                }
+                hint="Receives internal order, payment, sourcing and return alerts. Not exposed publicly."
+              />
+              <AdminTextField
+                label="Support operations email"
+                type="email"
+                value={form.supportNotificationEmail}
+                onChange={(event) =>
+                  update("supportNotificationEmail", event.target.value)
+                }
+                hint="Receives new support-thread alerts. Not exposed publicly."
               />
             </div>
 

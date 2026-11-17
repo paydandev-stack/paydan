@@ -22,13 +22,19 @@ function productResult(product: Product, signedIn: boolean) {
       id: variant.id,
       label: variant.label,
       availability: variant.availability,
-      ...(signedIn && typeof variant.price === "number" ? { price: variant.price } : {}),
+      ...(signedIn && typeof variant.price === "number"
+        ? { price: variant.price }
+        : {}),
     })),
   };
 }
 
 /** Use verified whole-word candidates before the optional PostgreSQL ranking. */
-async function rankedProducts(query: string, products: Product[], limit: number): Promise<Product[]> {
+async function rankedProducts(
+  query: string,
+  products: Product[],
+  limit: number,
+): Promise<Product[]> {
   const eligible = searchRelevantProducts(query, products, products.length);
   if (!eligible.length) return [];
   if (!process.env.DATABASE_URL) return eligible.slice(0, limit);
@@ -42,14 +48,21 @@ async function rankedProducts(query: string, products: Product[], limit: number)
          AND (search_document @@ websearch_to_tsquery('simple',$1) OR search_text % $1)
        ORDER BY ts_rank(search_document,websearch_to_tsquery('simple',$1)) DESC,
                 similarity(search_text,$1) DESC LIMIT $3`,
-      [normalizeProductQuery(query), eligible.map((item) => item.id), Math.max(limit, 30)],
+      [
+        normalizeProductQuery(query),
+        eligible.map((item) => item.id),
+        Math.max(limit, 30),
+      ],
     );
     const byId = new Map(eligible.map((product) => [product.id, product]));
     const dbRanked = result.rows
       .map((row) => byId.get(String(row.product_id)))
       .filter((item): item is Product => Boolean(item));
     const seen = new Set(dbRanked.map((item) => item.id));
-    return [...dbRanked, ...eligible.filter((item) => !seen.has(item.id))].slice(0, limit);
+    return [
+      ...dbRanked,
+      ...eligible.filter((item) => !seen.has(item.id)),
+    ].slice(0, limit);
   } catch (error) {
     // An unavailable search index should not take the shopping assistant down.
     console.warn("[Ask PAYDAN] Falling back to verified catalogue ranking", {
@@ -62,15 +75,28 @@ async function rankedProducts(query: string, products: Product[], limit: number)
 export async function assistantTools(user: Viewer | null) {
   const state = await snapshot(user);
   const signedIn = Boolean(user);
-  const published = state.products.filter((product) => product.status === "published" && !product.restricted);
+  const published = state.products.filter(
+    (product) => product.status === "published" && !product.restricted,
+  );
   return {
     searchCatalog: tool({
-      description: "Search PAYDAN's published catalog. Use this before recommending or claiming that an item exists.",
-      inputSchema: z.object({ query: z.string().trim().min(2).max(160), category: z.string().max(100).optional(), limit: z.number().int().min(1).max(6).default(4) }),
+      description:
+        "Search PAYDAN's published catalog. Use this before recommending or claiming that an item exists.",
+      inputSchema: z.object({
+        query: z.string().trim().min(2).max(160),
+        category: z.string().max(100).optional(),
+        limit: z.number().int().min(1).max(6).default(4),
+      }),
       execute: async ({ query, category, limit }) => {
-        const candidates = category ? published.filter((product) => product.categorySlug === category) : published;
+        const candidates = category
+          ? published.filter((product) => product.categorySlug === category)
+          : published;
         const products = await rankedProducts(query, candidates, limit);
-        return { kind: "products" as const, products: products.map((product) => productResult(product, signedIn)), priceVisibility: signedIn ? "member" : "hidden" };
+        return {
+          kind: "products" as const,
+          products: products.map((product) => productResult(product, signedIn)),
+          priceVisibility: signedIn ? "member" : "hidden",
+        };
       },
     }),
     getProductDetails: tool({
@@ -78,66 +104,188 @@ export async function assistantTools(user: Viewer | null) {
       inputSchema: z.object({ productId: z.string().max(160) }),
       execute: async ({ productId }) => {
         const product = published.find((item) => item.id === productId);
-        return product ? { kind: "product" as const, product: productResult(product, signedIn) } : { kind: "not-found" as const };
+        return product
+          ? {
+              kind: "product" as const,
+              product: productResult(product, signedIn),
+            }
+          : { kind: "not-found" as const };
       },
     }),
     compareProducts: tool({
-      description: "Compare two to four known PAYDAN product IDs using catalog facts only.",
-      inputSchema: z.object({ productIds: z.array(z.string().max(160)).min(2).max(4) }),
-      execute: async ({ productIds }) => ({ kind: "comparison" as const, products: published.filter((product) => productIds.includes(product.id)).map((product) => productResult(product, signedIn)) }),
+      description:
+        "Compare two to four known PAYDAN product IDs using catalog facts only.",
+      inputSchema: z.object({
+        productIds: z.array(z.string().max(160)).min(2).max(4),
+      }),
+      execute: async ({ productIds }) => ({
+        kind: "comparison" as const,
+        products: published
+          .filter((product) => productIds.includes(product.id))
+          .map((product) => productResult(product, signedIn)),
+      }),
     }),
     getCurrentCart: tool({
-      description: "Read the signed-in shopper's current cart. Never use for guests.",
+      description:
+        "Read the signed-in shopper's current cart. Never use for guests.",
       inputSchema: z.object({}),
-      execute: async () => user ? {
-        kind: "cart" as const,
-        lines: state.cart.map((line) => {
-          const product = published.find((item) => item.id === line.productId);
-          const variant = product?.variants.find((item) => item.id === line.variantId);
-          return { ...line, productName: product?.name || "Unavailable item", variantLabel: variant?.label || "", price: variant?.price };
-        }),
-      } : { kind: "auth-required" as const, href: "/login?next=%2Fcart" },
+      execute: async () =>
+        user
+          ? {
+              kind: "cart" as const,
+              lines: state.cart.map((line) => {
+                const product = published.find(
+                  (item) => item.id === line.productId,
+                );
+                const variant = product?.variants.find(
+                  (item) => item.id === line.variantId,
+                );
+                return {
+                  ...line,
+                  productName: product?.name || "Unavailable item",
+                  variantLabel: variant?.label || "",
+                  price: variant?.price,
+                };
+              }),
+            }
+          : { kind: "auth-required" as const, href: "/login?next=%2Fcart" },
     }),
     proposeCartChange: tool({
-      description: "Create a short-lived add-to-cart proposal for explicit user confirmation. This never changes the cart.",
-      inputSchema: z.object({ productId: z.string().max(160), variantId: z.string().max(160), quantity: z.number().int().min(1).max(20) }),
+      description:
+        "Create a short-lived add-to-cart proposal for explicit user confirmation. This never changes the cart.",
+      inputSchema: z.object({
+        productId: z.string().max(160),
+        variantId: z.string().max(160),
+        quantity: z.number().int().min(1).max(20),
+      }),
       execute: async ({ productId, variantId, quantity }) => {
-        if (!user) return { kind: "auth-required" as const, href: "/login?next=%2Fcart" };
+        if (!user)
+          return {
+            kind: "auth-required" as const,
+            href: "/login?next=%2Fcart",
+          };
         const product = published.find((item) => item.id === productId);
-        const variant = product?.variants.find((item) => item.id === variantId && item.availability !== "out_of_stock");
+        const variant = product?.variants.find(
+          (item) =>
+            item.id === variantId && item.availability !== "out_of_stock",
+        );
         if (!product || !variant) return { kind: "not-found" as const };
         const id = randomUUID();
         await database().query(
           "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'add_to_cart',$3,now()+interval '15 minutes')",
           [id, user.id, JSON.stringify({ productId, variantId, quantity })],
         );
-        return { kind: "cart-proposal" as const, proposalId: id, productId, variantId, quantity, expiresInSeconds: 900 };
+        return {
+          kind: "cart-proposal" as const,
+          proposalId: id,
+          productId,
+          variantId,
+          quantity,
+          expiresInSeconds: 900,
+        };
       },
     }),
     getOwnOrders: tool({
-      description: "Read only the signed-in shopper's own recent orders and statuses.",
-      inputSchema: z.object({ limit: z.number().int().min(1).max(5).default(3) }),
-      execute: async ({ limit }) => user ? { kind: "orders" as const, orders: state.orders.slice(0, limit).map((order) => ({ id: order.id, reference: order.reference, paymentStatus: order.paymentStatus, fulfillmentStatus: order.fulfillmentStatus, placedAt: order.placedAt })) } : { kind: "auth-required" as const, href: "/login?next=%2Faccount%2Forders" },
+      description:
+        "Read only the signed-in shopper's own recent orders and statuses.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(5).default(3),
+      }),
+      execute: async ({ limit }) =>
+        user
+          ? {
+              kind: "orders" as const,
+              orders: state.orders.slice(0, limit).map((order) => ({
+                id: order.id,
+                reference: order.reference,
+                paymentStatus: order.paymentStatus,
+                fulfillmentStatus: order.fulfillmentStatus,
+                placedAt: order.placedAt,
+              })),
+            }
+          : {
+              kind: "auth-required" as const,
+              href: "/login?next=%2Faccount%2Forders",
+            },
     }),
     getShippingOptions: tool({
-      description: "Explain configured shipping availability. Fees are account-only and checkout remains authoritative.",
+      description:
+        "Explain configured shipping availability. Fees are account-only and checkout remains authoritative.",
       inputSchema: z.object({ state: z.string().max(80).optional() }),
-      execute: async ({ state: requestedState }) => user ? { kind: "shipping" as const, zones: state.shippingZones.filter((zone) => zone.active && (!requestedState || zone.state.toLowerCase() === requestedState.toLowerCase())).map((zone) => ({ state: zone.state, eta: zone.eta, fee: zone.fee })), checkoutAuthoritative: true } : { kind: "shipping-policy" as const, text: "Delivery availability, fees and estimates are confirmed at checkout after sign-in.", href: "/policies/shipping" },
+      execute: async ({ state: requestedState }) =>
+        user
+          ? {
+              kind: "shipping" as const,
+              zones: state.shippingZones
+                .filter(
+                  (zone) =>
+                    zone.active &&
+                    (!requestedState ||
+                      zone.state.toLowerCase() ===
+                        requestedState.toLowerCase()),
+                )
+                .map((zone) => ({
+                  state: zone.state,
+                  eta: zone.eta,
+                  fee: zone.fee,
+                })),
+              checkoutAuthoritative: true,
+            }
+          : {
+              kind: "shipping-policy" as const,
+              text: "Delivery availability, fees and estimates are confirmed at checkout after sign-in.",
+              href: "/policies/shipping",
+            },
     }),
     getPolicyLinks: tool({
-      description: "Return server-approved PAYDAN policy links. Do not invent policy terms.",
-      inputSchema: z.object({ topic: z.enum(["shipping", "returns", "privacy", "terms"]) }),
-      execute: async ({ topic }) => ({ kind: "links" as const, links: [{ label: `${topic[0].toUpperCase()}${topic.slice(1)} policy`, href: `/policies/${topic}` }] }),
+      description:
+        "Return server-approved PAYDAN policy links. Do not invent policy terms.",
+      inputSchema: z.object({
+        topic: z.enum(["shipping", "returns", "privacy", "terms"]),
+      }),
+      execute: async ({ topic }) => ({
+        kind: "links" as const,
+        links: [
+          {
+            label: `${topic[0].toUpperCase()}${topic.slice(1)} policy`,
+            href: `/policies/${topic}`,
+          },
+        ],
+      }),
     }),
     createSourcingDraft: tool({
-      description: "Provide a safe handoff to the sourcing request form; this does not submit a request.",
-      inputSchema: z.object({ productName: z.string().max(160), notes: z.string().max(500).optional() }),
-      execute: async ({ productName, notes }) => ({ kind: "draft-link" as const, links: [{ label: "Complete sourcing request", href: `${user ? "" : "/login?next="}${user ? `/request-product?product=${encodeURIComponent(productName)}` : encodeURIComponent(`/request-product?product=${encodeURIComponent(productName)}`)}` }], draft: { productName, notes: notes || "" } }),
+      description:
+        "Provide a safe handoff to the sourcing request form; this does not submit a request.",
+      inputSchema: z.object({
+        productName: z.string().max(160),
+        notes: z.string().max(500).optional(),
+      }),
+      execute: async ({ productName, notes }) => ({
+        kind: "draft-link" as const,
+        links: [
+          {
+            label: "Complete sourcing request",
+            href: `${user ? "" : "/login?next="}${user ? `/request-product?product=${encodeURIComponent(productName)}` : encodeURIComponent(`/request-product?product=${encodeURIComponent(productName)}`)}`,
+          },
+        ],
+        draft: { productName, notes: notes || "" },
+      }),
     }),
     createSupportDraft: tool({
-      description: "Provide a handoff to PAYDAN support; this does not send a message.",
+      description:
+        "Provide a handoff to PAYDAN support; this does not send a message.",
       inputSchema: z.object({ subject: z.string().max(160) }),
-      execute: async ({ subject }) => ({ kind: "draft-link" as const, links: [{ label: "Contact support", href: user ? `/contact?subject=${encodeURIComponent(subject)}` : "/login?next=%2Fcontact" }] }),
+      execute: async ({ subject }) => ({
+        kind: "draft-link" as const,
+        links: [
+          {
+            label: "Contact support",
+            href: user
+              ? `/contact?subject=${encodeURIComponent(subject)}`
+              : "/login?next=%2Fcontact",
+          },
+        ],
+      }),
     }),
   };
 }

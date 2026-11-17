@@ -1,6 +1,6 @@
 # PAYDAN setup and operations
 
-Updated 7 November 2026. Application: `paydan-next`. The implementation uses Neon PostgreSQL, private AWS S3 with optional CloudFront catalog delivery, Google-only OAuth, email/password authentication, and Paystack. The AI provider remains undecided. This document describes implemented code and the external setup still required; it is not a claim that every live service has been commissioned.
+Updated 14 November 2026. Application: `paydan-next`. The implementation uses Neon PostgreSQL, private AWS S3 with optional CloudFront catalog delivery, Google-only OAuth, email/password authentication, Paystack, Vercel AI Gateway and a direct Groq failover adapter. This document describes implemented code and the external setup still required; it is not a claim that every live service has been commissioned.
 
 ## Local setup
 
@@ -13,16 +13,16 @@ Copy-Item .env.example .env.local
 
 Populate `.env.local` privately; never commit it or send secret keys in chat. No secret uses a `NEXT_PUBLIC_` name. Run `npm run config:check` to report missing variable names without printing values. This checks presence, not connectivity.
 
-| Service        | Required configuration                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| PostgreSQL     | Pooled `DATABASE_URL`; direct `DATABASE_URL_UNPOOLED` for migrations; verified TLS settings                 |
+| Service        | Required configuration                                                                                                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PostgreSQL     | Pooled `DATABASE_URL`; direct `DATABASE_URL_UNPOOLED` for migrations; verified TLS settings                                                                                                              |
 | Authentication | `BETTER_AUTH_URL` (canonical exact origin, HTTPS in production), `BETTER_AUTH_TRUSTED_ORIGINS` (comma-separated additional custom/preview origins), `BETTER_AUTH_SECRET` (at least 32 random characters) |
-| Google         | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                  |
-| Paystack       | `PAYSTACK_SECRET_KEY`; use a test key for staging                                                           |
-| S3             | `AWS_REGION`, `S3_BUCKET`; prefer an IAM role, or local AWS SDK credentials                                 |
-| Media CDN      | `MEDIA_CDN_URL`, the HTTPS CloudFront/custom-domain base URL for the private S3 origin                      |
-| Email          | `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, and credentials when required by the SMTP host                       |
-| AI, optional   | `AI_CHAT_COMPLETIONS_URL`, `AI_API_KEY`, `AI_MODEL`                                                         |
+| Google         | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                                                                                                               |
+| Paystack       | `PAYSTACK_SECRET_KEY`; use a test key for staging                                                                                                                                                        |
+| S3             | `AWS_REGION`, `S3_BUCKET`; prefer an IAM role, or local AWS SDK credentials                                                                                                                              |
+| Media CDN      | `MEDIA_CDN_URL`, the HTTPS CloudFront/custom-domain base URL for the private S3 origin                                                                                                                   |
+| Email          | `SMTP_HOST`, `SMTP_PORT`, `MAIL_FROM`, and credentials when required by the SMTP host                                                                                                                    |
+| AI, optional   | `AI_PROVIDER_PROFILE`, `AI_PROVIDER_TIMEOUT_MS`, Gateway primary/secondary model IDs, and server-only Gateway/Groq credentials                                                                           |
 
 Initialize the schema and start the app:
 
@@ -116,9 +116,11 @@ The mail worker processes up to 50 jobs per run, with locking and exponential re
 
 ## AI provider handoff
 
-No provider has been chosen or enabled. Until configured, the global chat truthfully says live AI is unavailable and links to browsing/sourcing. It does not pretend a model answered.
+Ask PAYDAN first sends one compound request to Vercel AI Gateway: `reflection/beam-free`, with Gateway-native fallback to `humansand/ampersand-v0.1`. If that request fails before any text, tool call or tool result with a timeout, network error, `408`, `429` or provider `5xx`, PAYDAN may try direct Groq with `openai/gpt-oss-20b`. The deterministic catalogue/search/support assistant is the final fallback. Invalid requests, authentication/authorization failures, malformed tools, browser cancellation, and failures after output do not trigger provider replay.
 
-The adapter expects an HTTPS chat-completions endpoint supporting JSON-object responses. A provider with a different protocol needs an adapter change. The model receives authorized catalogue/department data, the member's cart and limited own-order status; it receives no supplier costs, supplier contacts or delivery addresses. User messages may themselves contain personal information, so review the selected provider's data handling and retention before enabling it.
+Set `AI_PROVIDER_PROFILE=production`, `AI_PROVIDER_TIMEOUT_MS=12000`, `AI_PRIMARY_MODEL`, `AI_SECONDARY_MODEL`, `GROQ_MODEL`, and the applicable server-only keys. Vercel OIDC can authenticate Gateway on Vercel; direct Groq always requires its own `GROQ_API_KEY`. The old `AI_GROQ_*` and `AI_TEST_GROQ_*` names are rejected. Rotate any Groq key that has appeared in logs or chat before deployment.
+
+The model receives authorized catalogue/department data, the member's cart and limited own-order status through controlled tools; it receives no supplier costs, supplier contacts or delivery addresses. User messages may themselves contain personal information, so review each selected provider's data handling and retention before enabling it. Provider logs record only sanitized routing metadata and usage.
 
 Replies can propose products, variants and quantities. A user must confirm each cart mutation, which goes through the same server command and cart as the regular UI. The model cannot take payment, place orders or alter permissions. Guest replies use controlled catalogue explanations to avoid invented prices; member price data comes from authorized catalogue context. Chat history is held in sessionStorage, partitioned by owner, with up to 16 recent turns sent per request. It is cleared on sign-out/account change; a guest thread may carry into the first sign-in. No server chat archive is implemented.
 
@@ -130,7 +132,9 @@ Run `npm run test:smoke` against a local preview at port 3107, or set `SMOKE_BAS
 
 Before accepting production launch, use staging credentials to exercise email verification/reset, Google new/existing-account linking, two-account isolation, each staff role, S3 upload/private download denial, Paystack success/failure/duplicate webhook/reload, sourced checkout, partial refund, SMTP retries, and the chosen AI provider. Test the signed-in desktop/mobile flows with real staging data. The automated PGlite suite does not replace a deployed PostgreSQL concurrency/TLS test or real provider contract tests.
 
-Publish real policies, support details, supplier availability, shipping terms and return rules approved by the business. Current policy copy remains marked draft. Establish PostgreSQL backups/PITR, S3 versioning, restoration drills, error monitoring and retention procedures. Entity data uses owner-indexed JSONB records with separate payment/inventory/receipt tables; large catalogues will need pagination and focused queries beyond the current snapshot approach.
+Publish real policies, support details, supplier availability, shipping terms and return rules approved by the business. Current policy copy remains marked draft. Establish PostgreSQL backups/PITR, S3 versioning, restoration drills, error monitoring and retention procedures. Buyer catalogue/search requests use cursor pagination and focused server queries; the small merchandising snapshot is capped and contains only featured/new items plus products referenced by the signed-in buyer.
+
+Retain operational audit records for at least 24 months unless the business approves a longer legal or accounting period. Super Admins can export a sanitized CSV from **Admin → Audit trail** before an approved purge. Database backup retention is separate from application audit retention; document every purge ticket, cutoff date, export location and approving administrator. Never place exported audit or customer data in a public S3 prefix.
 
 For rollback, keep the prior application build and a pre-migration backup. Prefer compatible forward fixes. Do not automatically drop new tables or replay financial operations. Reconcile Paystack independently before restoring payment-related records.
 

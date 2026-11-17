@@ -18,6 +18,7 @@ type BannerDraft = {
   ctaLabel: string;
   href: string;
   image: string;
+  altText: string;
   placement: Banner["placement"];
   startAt: string; // yyyy-mm-dd for <input type="date">
   endAt: string;
@@ -35,6 +36,7 @@ function blankDraft(): BannerDraft {
     ctaLabel: "",
     href: "",
     image: "",
+    altText: "",
     placement: "hero",
     startAt: isoDay(0),
     endAt: isoDay(30),
@@ -48,6 +50,7 @@ function toDraft(banner: Banner): BannerDraft {
     ctaLabel: banner.ctaLabel,
     href: banner.href,
     image: banner.image,
+    altText: banner.altText ?? "",
     placement: banner.placement,
     startAt: banner.startAt.slice(0, 10),
     endAt: banner.endAt.slice(0, 10),
@@ -97,6 +100,13 @@ function BannerFields({
         value={value.image}
         onChange={(event) => onChange({ image: event.target.value })}
       />
+      <AdminTextField
+        label="Image alt text"
+        required
+        value={value.altText}
+        hint="Describe the meaningful image for screen-reader users."
+        onChange={(event) => onChange({ altText: event.target.value })}
+      />
       <AdminSelect
         label="Placement"
         value={value.placement}
@@ -134,6 +144,7 @@ function applyDraft(banner: Banner, draft: BannerDraft): Banner {
     ctaLabel: draft.ctaLabel.trim(),
     href: draft.href.trim(),
     image: draft.image.trim(),
+    altText: draft.altText.trim(),
     placement: draft.placement,
     startAt: `${draft.startAt}T00:00:00.000Z`,
     endAt: `${draft.endAt}T23:59:59.000Z`,
@@ -146,8 +157,11 @@ export default function AdminBannersPage() {
   const [editDraft, setEditDraft] = useState<BannerDraft>(blankDraft);
   const [createDraft, setCreateDraft] = useState<BannerDraft>(blankDraft);
   const draftValid = (draft: BannerDraft): boolean => {
-    if (!draft.title.trim() || !draft.href.trim()) {
-      actions.notify("A banner needs a title and a button link.", "error");
+    if (!draft.title.trim() || !draft.href.trim() || !draft.altText.trim()) {
+      actions.notify(
+        "A banner needs a title, button link and image description.",
+        "error",
+      );
       return false;
     }
     if (!draft.startAt || !draft.endAt) {
@@ -192,6 +206,7 @@ export default function AdminBannersPage() {
           ctaLabel: "",
           href: "",
           image: "",
+          altText: "",
           placement: "hero",
           active: true,
           startAt: "",

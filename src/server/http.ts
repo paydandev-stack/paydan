@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "./auth";
 import { database, records } from "./db";
 import type { AdminRole, TeamMember } from "@/lib/types";
+import { hasCapability, type AdminCapability } from "@/lib/capabilities";
 import { isTrustedOrigin } from "./origins";
 import { ensureTestBuyerData } from "./test-buyer";
 
@@ -65,6 +66,22 @@ export function requireRole(user: Viewer | null, roles: AdminRole[]) {
   if (!user.role || (user.role !== "Super Admin" && !roles.includes(user.role)))
     throw new HttpError(403, "Your role cannot perform this action.");
 }
+export function requireCapability(
+  user: Viewer | null,
+  capability: AdminCapability,
+) {
+  requireUser(user);
+  if (!hasCapability(user.role, capability))
+    throw new HttpError(403, "Your role cannot perform this action.");
+}
+export function requireAnyCapability(
+  user: Viewer | null,
+  capabilities: AdminCapability[],
+) {
+  requireUser(user);
+  if (!capabilities.some((capability) => hasCapability(user.role, capability)))
+    throw new HttpError(403, "Your role cannot perform this action.");
+}
 export function sameOrigin(request: Request) {
   if (!isTrustedOrigin(request.headers.get("origin")))
     throw new HttpError(403, "Invalid request origin.");
@@ -87,13 +104,14 @@ export async function limit(key: string, max = 60, seconds = 60) {
   if (result.rows[0].count > max)
     throw new HttpError(429, "Too many requests. Please try again shortly.");
 }
-export function json(data: unknown, status = 200) {
+export function json(data: unknown, status = 200, headers?: HeadersInit) {
   return Response.json(data, {
     status,
     headers: {
       "Cache-Control": "private, no-store",
       Vary: "Cookie",
       "X-Content-Type-Options": "nosniff",
+      ...headers,
     },
   });
 }

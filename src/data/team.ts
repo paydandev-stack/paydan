@@ -64,6 +64,8 @@ export const storeSettings: StoreSettings = {
   businessHours: "Monday to Saturday, 9:00–18:00 WAT",
   currency: "NGN",
   announcement: "Thoughtfully sourced products, coordinated by Paydan",
+  orderNotificationEmail: "",
+  supportNotificationEmail: "",
   paystackStatus: "not_connected",
   transferEnabled: false,
 };

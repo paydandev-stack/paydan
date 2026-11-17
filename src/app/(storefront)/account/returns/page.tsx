@@ -5,6 +5,7 @@ import { useDemo } from "@/lib/store";
 import { formatDate, plural } from "@/lib/format";
 import { returnReasons, returnStatusMeta } from "@/lib/status";
 import { StatusPill } from "@/components/status-pill";
+import { normalizedOrderItems } from "@/lib/order-lines";
 export default function AccountReturnsPage() {
   const { state, actions } = useDemo();
   const session = state.customerSession;
@@ -15,7 +16,7 @@ export default function AccountReturnsPage() {
       order.fulfillmentStatus === "delivered",
   );
   const [orderId, setOrderId] = useState(orders[0]?.id ?? "");
-  const [productId, setProductId] = useState("");
+  const [lineId, setLineId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [reason, setReason] = useState(returnReasons[0]);
   const [detail, setDetail] = useState("");
@@ -23,6 +24,9 @@ export default function AccountReturnsPage() {
   const [error, setError] = useState("");
   if (!session) return null;
   const selectedOrder = orders.find((order) => order.id === orderId);
+  const selectedItems = selectedOrder
+    ? normalizedOrderItems(selectedOrder)
+    : [];
   const requests = state.returns.filter(
     (request) => request.customerId === session.id,
   );
@@ -33,14 +37,14 @@ export default function AccountReturnsPage() {
         setError("Choose the order you want to return an item from.");
         return;
       }
-      const itemId = productId || selectedOrder.items[0]?.productId;
+      const itemId = lineId || selectedItems[0]?.lineId;
       if (!itemId) {
         setError("This order has no items to return.");
         return;
       }
       await actions.createReturn({
         orderId: selectedOrder.id,
-        productId: itemId,
+        lineId: itemId,
         quantity: Math.max(1, Number(quantity) || 1),
         reason,
         detail: detail.trim(),
@@ -85,7 +89,7 @@ export default function AccountReturnsPage() {
                 value={orderId}
                 onChange={(event) => {
                   setOrderId(event.target.value);
-                  setProductId("");
+                  setLineId("");
                 }}
               >
                 {orders.map((order) => (
@@ -98,12 +102,13 @@ export default function AccountReturnsPage() {
             <label>
               Item
               <select
-                value={productId}
-                onChange={(event) => setProductId(event.target.value)}
+                value={lineId}
+                onChange={(event) => setLineId(event.target.value)}
               >
-                {selectedOrder?.items.map((item) => (
-                  <option key={item.productId} value={item.productId}>
-                    {item.name}
+                {selectedItems.map((item) => (
+                  <option key={item.lineId} value={item.lineId}>
+                    {item.name} · {item.variantLabel}
+                    {item.sku ? ` · ${item.sku}` : ""}
                   </option>
                 ))}
               </select>

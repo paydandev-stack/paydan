@@ -12,9 +12,11 @@ import {
 import { StatusPill } from "@/components/status-pill";
 import { money, plural } from "@/lib/format";
 import { vendorStatusMeta } from "@/lib/status";
+import { hasCapability } from "@/lib/capabilities";
 /** Vendor network: search, status filter, supply counts and hold/activate controls. */
 export default function AdminVendorsPage() {
   const { state, actions } = useDemo();
+  const canWrite = hasCapability(state.adminSession?.role, "vendors.write");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const filtered = useMemo(() => {
@@ -41,9 +43,11 @@ export default function AdminVendorsPage() {
         title="Vendors"
         description={`${plural(state.vendors.length, "supplier")} in the network · ${activeCount} active, ${holdCount} on hold`}
         action={
-          <Link className="admin-btn" href="/admin/vendors/new">
-            New vendor
-          </Link>
+          canWrite ? (
+            <Link className="admin-btn" href="/admin/vendors/new">
+              New vendor
+            </Link>
+          ) : undefined
         }
       />
 
@@ -141,21 +145,25 @@ export default function AdminVendorsPage() {
                   >
                     Open
                   </Link>
-                  <button
-                    type="button"
-                    className="admin-btn ghost"
-                    onClick={async () => {
-                      try {
-                        return await actions.saveVendor({
-                          ...vendor,
-                          status:
-                            vendor.status === "active" ? "on_hold" : "active",
-                        });
-                      } catch (error) {}
-                    }}
-                  >
-                    {vendor.status === "active" ? "Put on hold" : "Reactivate"}
-                  </button>
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      className="admin-btn ghost"
+                      onClick={async () => {
+                        try {
+                          return await actions.saveVendor({
+                            ...vendor,
+                            status:
+                              vendor.status === "active" ? "on_hold" : "active",
+                          });
+                        } catch (error) {}
+                      }}
+                    >
+                      {vendor.status === "active"
+                        ? "Put on hold"
+                        : "Reactivate"}
+                    </button>
+                  ) : null}
                 </span>
               </div>
             );

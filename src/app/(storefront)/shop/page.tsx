@@ -19,6 +19,7 @@ export default function ShopPage() {
       description="Every published product across the storefront. Sign in to view current prices and shop."
       products={visibleProducts(state.products)}
       departments={departments}
+      serverQuery={{ collection: "all" }}
     />
   );
 }

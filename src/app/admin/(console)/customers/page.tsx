@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -20,6 +20,7 @@ export default function AdminCustomersPage() {
   const { state } = useDemo();
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(50);
 
   const segments = [
     ...new Set(state.customers.flatMap((customer) => customer.segments)),
@@ -64,6 +65,8 @@ export default function AdminCustomersPage() {
       segment === "all" || customer.segments.includes(segment);
     return matchesQuery && matchesSegment;
   });
+  useEffect(() => setVisibleCount(50), [query, segment]);
+  const visibleCustomers = filtered.slice(0, visibleCount);
 
   return (
     <>
@@ -149,7 +152,7 @@ export default function AdminCustomersPage() {
           head={["Customer", "Location", "Segment", "Joined", "Orders"]}
           caption="Customers matching the current filters; each row opens the profile"
         >
-          {filtered.map((customer) => (
+          {visibleCustomers.map((customer) => (
             <Link
               className="table-row"
               key={customer.id}
@@ -184,6 +187,17 @@ export default function AdminCustomersPage() {
           ))}
         </AdminTable>
       )}
+      {visibleCustomers.length < filtered.length ? (
+        <div className="admin-actions" style={{ justifyContent: "center" }}>
+          <button
+            className="admin-btn quiet"
+            type="button"
+            onClick={() => setVisibleCount((count) => count + 50)}
+          >
+            Load 50 more customers
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -68,6 +68,7 @@ function SearchResults() {
       description={`${results.length === 0 ? "No matches" : "Matching products"} across the Paydan catalogue. Search covers product names, brands, descriptions and departments.`}
       products={results}
       departments={departments}
+      serverQuery={{ q: query }}
       emptyTitle={`Nothing matched “${query}”`}
       emptyMessage="Check the spelling, try a broader term, or send a sourcing request and we will look for the item."
     />

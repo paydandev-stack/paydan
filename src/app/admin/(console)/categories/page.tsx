@@ -20,6 +20,10 @@ type Draft = {
   active: boolean;
   restricted: boolean;
   facets: string;
+  subcategories: string;
+  shortDescription: string;
+  homepageVisible: boolean;
+  homepageOrder: string;
 };
 function toDraft(category: Category): Draft {
   return {
@@ -30,6 +34,12 @@ function toDraft(category: Category): Draft {
     active: category.active !== false,
     restricted: category.restricted,
     facets: category.facets.join(", "),
+    subcategories: category.subcategories
+      .map((subcategory) => `${subcategory.slug}: ${subcategory.name}`)
+      .join("\n"),
+    shortDescription: category.shortDescription ?? "",
+    homepageVisible: category.homepageVisible !== false,
+    homepageOrder: String(category.homepageOrder ?? category.order),
   };
 }
 /** Department directory with an inline editor for the selected category. */
@@ -77,6 +87,18 @@ export default function AdminCategoriesPage() {
           .split(",")
           .map((facet) => facet.trim())
           .filter(Boolean),
+        subcategories: draft.subcategories
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const [slug, ...name] = line.split(":");
+            return { slug: slug.trim(), name: name.join(":").trim() };
+          })
+          .filter((item) => item.slug && item.name),
+        shortDescription: draft.shortDescription.trim(),
+        homepageVisible: draft.homepageVisible,
+        homepageOrder: Number(draft.homepageOrder) || order,
       });
       actions.notify(`${name} updated`);
       closeEditor();
@@ -215,6 +237,14 @@ export default function AdminCategoriesPage() {
                 }
               />
               <AdminTextField
+                label="Homepage summary"
+                value={draft.shortDescription}
+                onChange={(event) =>
+                  setDraftField("shortDescription", event.target.value)
+                }
+                hint="Short copy shown on the homepage department card."
+              />
+              <AdminTextField
                 label="Navigation order"
                 type="number"
                 step={1}
@@ -266,6 +296,43 @@ export default function AdminCategoriesPage() {
                 }
                 hint="Comma-separated filters, e.g. Storage, Colour."
               />
+              <AdminTextArea
+                label="Subcategories"
+                rows={5}
+                value={draft.subcategories}
+                onChange={(event) =>
+                  setDraftField("subcategories", event.target.value)
+                }
+                hint="One per line as slug: Display name."
+              />
+              <label
+                className={`choice${draft.homepageVisible ? " active" : ""}`}
+                style={{ margin: 0 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.homepageVisible}
+                  onChange={(event) =>
+                    setDraftField("homepageVisible", event.target.checked)
+                  }
+                />
+                <span>
+                  Show on homepage
+                  <small>
+                    The homepage uses this database-controlled setting.
+                  </small>
+                </span>
+              </label>
+              <AdminTextField
+                label="Homepage order"
+                type="number"
+                min={0}
+                step={1}
+                value={draft.homepageOrder}
+                onChange={(event) =>
+                  setDraftField("homepageOrder", event.target.value)
+                }
+              />
               <div className="admin-actions">
                 <button type="submit" className="admin-btn">
                   Save changes
@@ -288,8 +355,8 @@ export default function AdminCategoriesPage() {
               }}
             >
               Select a department in the table to edit its name, shelf copy,
-              sort order, visibility, 18+ flag and facet filters. Changes
-              apply to the storefront navigation immediately.
+              sort order, visibility, 18+ flag and facet filters. Changes apply
+              to the storefront navigation immediately.
             </p>
           )}
         </aside>

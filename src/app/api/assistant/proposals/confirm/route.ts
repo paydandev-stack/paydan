@@ -1,5 +1,12 @@
 import { confirmAssistantProposal } from "@/server/assistant";
-import { body, failure, json, requireUser, sameOrigin, viewer } from "@/server/http";
+import {
+  body,
+  failure,
+  json,
+  requireUser,
+  sameOrigin,
+  viewer,
+} from "@/server/http";
 
 export async function POST(request: Request) {
   try {

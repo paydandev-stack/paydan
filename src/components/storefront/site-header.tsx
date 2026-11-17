@@ -45,6 +45,9 @@ export function SiteHeader() {
     (total, line) => total + line.quantity,
     0,
   );
+  const unreadCount = state.notifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
 
   function closeAll() {
     setNavOpen(false);
@@ -115,10 +118,14 @@ export function SiteHeader() {
             <MenuIcon />
           </button>
 
-          <Link className="brand" href="/" aria-label="Paydan home">
+          <Link
+            className="brand"
+            href="/"
+            aria-label={`${state.settings.storeName} home`}
+          >
             <img
               src="/paydan-logo.png"
-              alt="Paydan"
+              alt={state.settings.storeName}
               width={3000}
               height={3223}
             />
@@ -186,6 +193,16 @@ export function SiteHeader() {
           </form>
 
           <nav className="actions" aria-label="Quick links">
+            {state.customerSession ? (
+              <Link className="cart-link" href="/account/notifications">
+                <span>Updates</span>
+                {unreadCount > 0 ? (
+                  <b aria-label={`${unreadCount} unread updates`}>
+                    {unreadCount}
+                  </b>
+                ) : null}
+              </Link>
+            ) : null}
             <Link href="/account/wishlist">
               <HeartIcon />
               <span>Wishlist</span>
@@ -212,7 +229,9 @@ export function SiteHeader() {
           <div className="wrap nav-inner">
             <div className="mobile-drawer-head">
               <strong>Browse PAYDAN</strong>
-              <button type="button" onClick={closeAll} aria-label="Close menu">×</button>
+              <button type="button" onClick={closeAll} aria-label="Close menu">
+                ×
+              </button>
             </div>
             <button
               type="button"
@@ -285,7 +304,14 @@ export function SiteHeader() {
           ) : null}
         </div>
       </header>
-      {navOpen ? <button type="button" className="site-nav-backdrop" onClick={closeAll} aria-label="Close menu" /> : null}
+      {navOpen ? (
+        <button
+          type="button"
+          className="site-nav-backdrop"
+          onClick={closeAll}
+          aria-label="Close menu"
+        />
+      ) : null}
     </>
   );
 }

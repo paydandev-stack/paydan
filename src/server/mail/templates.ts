@@ -37,33 +37,120 @@ function content(key: MailTemplateKey, data: TemplateData) {
   const status = String(data.status ?? "").replaceAll("_", " ");
   switch (key) {
     case "auth.verify":
-      return { subject: "Verify your PAYDAN email", heading: "Verify your email", message: "Confirm your email address to finish setting up your PAYDAN account.", cta: "Verify email", href: String(data.url) };
+      return {
+        subject: "Verify your PAYDAN email",
+        heading: "Verify your email",
+        message:
+          "Confirm your email address to finish setting up your PAYDAN account.",
+        cta: "Verify email",
+        href: String(data.url),
+      };
     case "auth.reset":
-      return { subject: "Reset your PAYDAN password", heading: "Reset your password", message: "Use the secure link below to choose a new password. If you did not request this, you can ignore this email.", cta: "Reset password", href: String(data.url) };
+      return {
+        subject: "Reset your PAYDAN password",
+        heading: "Reset your password",
+        message:
+          "Use the secure link below to choose a new password. If you did not request this, you can ignore this email.",
+        cta: "Reset password",
+        href: String(data.url),
+      };
     case "team.invite":
-      return { subject: "You have been invited to PAYDAN operations", heading: "Operations invitation", message: "Create and verify your PAYDAN account. A super administrator will activate your assigned operations access.", cta: "Create account", href: siteUrl("/register") };
+      return {
+        subject: "You have been invited to PAYDAN operations",
+        heading: "Operations invitation",
+        message:
+          "Create and verify your PAYDAN account. A super administrator will activate your assigned operations access.",
+        cta: "Create account",
+        href: siteUrl("/register"),
+      };
     case "payment.received":
-      return { subject: `PAYDAN payment received — ${reference}`, heading: "Payment confirmed", message: `We received ${data.amount}. Your order ${reference} is now being processed.`, cta: "View order", href: siteUrl(`/account/orders/${data.orderId}`) };
+      return {
+        subject: `PAYDAN payment received — ${reference}`,
+        heading: "Payment confirmed",
+        message: `We received ${data.amount}. Your order ${reference} is now being processed.`,
+        cta: "View order",
+        href: siteUrl(`/account/orders/${data.orderId}`),
+      };
     case "order.status":
-      return { subject: `PAYDAN order ${reference} updated`, heading: "Order update", message: `Your order ${reference} is now ${status}.`, cta: "View order", href: siteUrl(`/account/orders/${data.orderId}`) };
+      return {
+        subject: `PAYDAN order ${reference} updated`,
+        heading: "Order update",
+        message: `Your order ${reference} is now ${status}.`,
+        cta: "View order",
+        href: siteUrl(`/account/orders/${data.orderId}`),
+      };
     case "sourcing.received":
-      return { subject: `PAYDAN sourcing request received — ${reference}`, heading: "Request received", message: `Your sourcing request ${reference} is being reviewed by the PAYDAN team.`, cta: "View request", href: siteUrl(`/account/sourcing-requests/${data.requestId}`) };
+      return {
+        subject: `PAYDAN sourcing request received — ${reference}`,
+        heading: "Request received",
+        message: `Your sourcing request ${reference} is being reviewed by the PAYDAN team.`,
+        cta: "View request",
+        href: siteUrl(`/account/sourcing-requests/${data.requestId}`),
+      };
     case "sourcing.quote":
-      return { subject: `Your PAYDAN quotation is ready — ${reference}`, heading: "Your quotation is ready", message: `Review request ${reference} before ${data.validUntil}. Nothing is ordered until you accept the quote and complete payment.`, cta: "Review quotation", href: siteUrl(`/account/sourcing-requests/${data.requestId}`) };
+      return {
+        subject: `Your PAYDAN quotation is ready — ${reference}`,
+        heading: "Your quotation is ready",
+        message: `Review request ${reference} before ${data.validUntil}. Nothing is ordered until you accept the quote and complete payment.`,
+        cta: "Review quotation",
+        href: siteUrl(`/account/sourcing-requests/${data.requestId}`),
+      };
     case "sourcing.supply_ready":
-      return { subject: `Your sourced order is ready for payment — ${reference}`, heading: "Supplier availability confirmed", message: `Supplier availability is confirmed for ${reference}. Review delivery details and payment in your account.`, cta: "Review order", href: siteUrl(`/account/orders/${data.orderId}`) };
+      return {
+        subject: `Your sourced order is ready for payment — ${reference}`,
+        heading: "Supplier availability confirmed",
+        message: `Supplier availability is confirmed for ${reference}. Review delivery details and payment in your account.`,
+        cta: "Review order",
+        href: siteUrl(`/account/orders/${data.orderId}`),
+      };
     case "return.received":
-      return { subject: `PAYDAN return request received — ${reference}`, heading: "Return request received", message: `We received return request ${reference}. The team will review it before any refund is initiated.`, cta: "View returns", href: siteUrl("/account/returns") };
+      return {
+        subject: `PAYDAN return request received — ${reference}`,
+        heading: "Return request received",
+        message: `We received return request ${reference}. The team will review it before any refund is initiated.`,
+        cta: "View returns",
+        href: siteUrl("/account/returns"),
+      };
     case "return.status":
-      return { subject: `PAYDAN return ${reference} updated`, heading: "Return update", message: `Your return request ${reference} is now ${status}.`, cta: "View returns", href: siteUrl("/account/returns") };
+      return {
+        subject: `PAYDAN return ${reference} updated`,
+        heading: "Return update",
+        message: `Your return request ${reference} is now ${status}.`,
+        cta: "View returns",
+        href: siteUrl("/account/returns"),
+      };
     case "refund.processed":
-      return { subject: `PAYDAN refund processed — ${reference}`, heading: "Refund processed", message: `Paystack has confirmed the refund for order ${reference}. Your bank may take additional time to display the credit.`, cta: "View order", href: siteUrl(`/account/orders/${data.orderId}`) };
+      return {
+        subject: `PAYDAN refund processed — ${reference}`,
+        heading: "Refund processed",
+        message: `Paystack has confirmed the refund for order ${reference}. Your bank may take additional time to display the credit.`,
+        cta: "View order",
+        href: siteUrl(`/account/orders/${data.orderId}`),
+      };
     case "support.received":
-      return { subject: `PAYDAN support request ${reference}`, heading: "We received your message", message: "Our team will reply to your verified email address.", cta: "Open help centre", href: siteUrl("/help") };
+      return {
+        subject: `PAYDAN support request ${reference}`,
+        heading: "We received your message",
+        message: "Our team will reply to your verified email address.",
+        cta: "Open help centre",
+        href: siteUrl("/help"),
+      };
     case "support.reply":
-      return { subject: `PAYDAN: ${data.subject}`, heading: "A reply from PAYDAN support", message: String(data.reply), cta: "Contact support", href: siteUrl("/contact") };
+      return {
+        subject: `PAYDAN: ${data.subject}`,
+        heading: "A reply from PAYDAN support",
+        message: String(data.reply),
+        cta: "Contact support",
+        href: siteUrl("/contact"),
+      };
     case "operations.alert":
-      return { subject: `PAYDAN operations: ${data.title}`, heading: String(data.title), message: String(data.message), cta: "Open operations", href: siteUrl(String(data.href || "/admin")) };
+      return {
+        subject: `PAYDAN operations: ${data.title}`,
+        heading: String(data.title),
+        message: String(data.message),
+        cta: "Open operations",
+        href: siteUrl(String(data.href || "/admin")),
+      };
   }
 }
 

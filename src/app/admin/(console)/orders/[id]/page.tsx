@@ -20,6 +20,7 @@ import {
 } from "@/lib/status";
 import { orderCost } from "@/lib/order-math";
 import type { FulfillmentStatus, PaymentStatus } from "@/lib/types";
+import { hasCapability } from "@/lib/capabilities";
 const paymentOptions = Object.entries(paymentStatusMeta).map(
   ([value, meta]) => ({
     value,
@@ -56,10 +57,11 @@ export default function AdminOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
   if (!order) notFound();
-  const canManage = ["Super Admin", "Order Manager"].includes(
-    state.adminSession?.role ?? "",
+  const canManage = hasCapability(
+    state.adminSession?.role,
+    "orders.fulfil",
   );
-  if (state.adminSession?.role === "Support")
+  if (hasCapability(state.adminSession?.role, "support.read"))
     return (
       <>
         <AdminPageHeader

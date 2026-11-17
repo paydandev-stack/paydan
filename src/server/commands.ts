@@ -11,12 +11,48 @@ import type {
   SourcingRequest,
   TeamMember,
 } from "@/lib/types";
+import type { AdminCapability } from "@/lib/capabilities";
+import {
+  isCustomerVisibleProduct,
+  isPurchasableVariant,
+} from "@/lib/catalog-visibility";
+import { findOrderLine } from "@/lib/order-lines";
 import { emptyState } from "@/lib/empty-state";
 import { put, record, records, transaction, type Queryable } from "./db";
-import { HttpError, requireRole, type Viewer } from "./http";
+import { HttpError, requireCapability, type Viewer } from "./http";
 import * as s from "./schemas";
 import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
-import { productRecordKind } from "./test-buyer";
+import { isTestBuyer, productRecordKind, scopedRecordKind } from "./test-buyer";
+import { writeAudit } from "./audit";
+import {
+  enqueueNotification,
+  enqueueViewerNotification,
+} from "./notifications";
+
+const commandCapabilities: Record<string, AdminCapability> = {
+  saveShippingZone: "shipping.write",
+  saveProduct: "catalog.write",
+  setProductStatus: "catalog.write",
+  saveCategory: "departments.write",
+  updateCategory: "departments.write",
+  saveVendor: "vendors.write",
+  updateShippingZone: "shipping.write",
+  updateSourcing: "sourcing.write",
+  setSourcingStatus: "sourcing.write",
+  saveQuote: "sourcing.write",
+  sendQuote: "sourcing.write",
+  convertQuoteToOrder: "sourcing.write",
+  saveVoucher: "promotions.write",
+  toggleVoucher: "promotions.write",
+  saveBanner: "promotions.write",
+  toggleBanner: "promotions.write",
+  updateOrderStatus: "orders.fulfil",
+  updateVendorStage: "sourcing.write",
+  addTeamMember: "team.manage",
+  updateTeamMember: "team.manage",
+  updateSettings: "settings.manage",
+  updateReturn: "returns.review",
+};
 
 export async function command(
   user: Viewer,
@@ -45,13 +81,15 @@ export async function command(
       "INSERT INTO command_receipt(owner_id,key,digest,result) VALUES($1,$2,$3,$4)",
       [user.id, key, digest, JSON.stringify(result ?? null)],
     );
-    await put(db, "audit", randomUUID(), {
-      id: randomUUID(),
-      actor: user.email,
-      action: name,
-      record: String(args[0] && typeof args[0] === "string" ? args[0] : ""),
-      at: new Date().toISOString(),
-    });
+    const capability = commandCapabilities[name];
+    if (!isTestBuyer(user) && (capability || user.role))
+      await writeAudit(db, {
+        actor: user.email,
+        action: name,
+        record: String(args[0] && typeof args[0] === "string" ? args[0] : ""),
+        capability,
+        source: user.role ? "admin" : "customer",
+      });
     return result ?? null;
   });
 }
@@ -86,6 +124,7 @@ async function saveAccount(db: Queryable, user: Viewer, a: DemoState) {
       location: a.location,
       lastOrderId: a.lastOrderId,
       lastSourcingReference: a.lastSourcingReference,
+      recentlyViewed: a.recentlyViewed,
     },
     user.id,
   );
@@ -99,18 +138,12 @@ async function validLine(
 ): Promise<CartLine> {
   const p = await required<Product>(db, productRecordKind(user), pid);
   const variant = p.variants.find((v) => v.id === vid);
-  const category = await record<{ restricted: boolean }>(
+  const category = await record<{ active?: boolean; restricted: boolean }>(
     db,
     "categories",
     p.categorySlug,
   );
-  if (
-    category?.restricted ||
-    p.status !== "published" ||
-    p.restricted ||
-    !variant ||
-    variant.availability === "out_of_stock"
-  )
+  if (!variant || !isPurchasableVariant(p, category, variant))
     throw new HttpError(409, "That selection is unavailable.");
   return {
     productId: p.id,
@@ -133,6 +166,7 @@ async function execute(
     "saveForLater",
     "moveToCart",
     "toggleWishlist",
+    "recordProductView",
     "addAddress",
     "updateAddress",
     "removeAddress",
@@ -208,11 +242,29 @@ async function execute(
       }
     } else if (name === "toggleWishlist") {
       const p = await required<Product>(db, productRecordKind(user), a);
-      if (p.status !== "published" || p.restricted)
+      const category = await record<{ active?: boolean; restricted: boolean }>(
+        db,
+        "categories",
+        p.categorySlug,
+      );
+      if (!isCustomerVisibleProduct(p, category))
         throw new HttpError(404, "Product not found.");
       state.wishlist = state.wishlist.includes(p.id)
         ? state.wishlist.filter((id) => id !== p.id)
         : [...state.wishlist, p.id];
+    } else if (name === "recordProductView") {
+      const p = await required<Product>(db, productRecordKind(user), a);
+      const category = await record<{ active?: boolean; restricted: boolean }>(
+        db,
+        "categories",
+        p.categorySlug,
+      );
+      if (!isCustomerVisibleProduct(p, category))
+        throw new HttpError(404, "Product not found.");
+      state.recentlyViewed = [
+        p.id,
+        ...state.recentlyViewed.filter((id) => id !== p.id),
+      ].slice(0, 20);
     } else if (name === "addAddress") {
       const value = s.address.parse(a);
       if (state.addresses.length >= 20)
@@ -245,7 +297,9 @@ async function execute(
     return null;
   }
   if (name === "updateCustomer") {
-    if (a !== user.id) requireRole(user, ["Support"]);
+    const editingAnotherCustomer = a !== user.id;
+    if (editingAnotherCustomer)
+      requireCapability(user, "customers.support-note");
     const patch = z
       .object({
         name: s.short.optional(),
@@ -256,6 +310,11 @@ async function execute(
         email: z.email().optional(),
       })
       .parse(b);
+    if (
+      editingAnotherCustomer &&
+      Object.keys(patch).some((key) => key !== "notes")
+    )
+      throw new HttpError(403, "Support can update internal notes only.");
     if (a === user.id && patch.email && patch.email !== user.email)
       throw new HttpError(
         400,
@@ -313,28 +372,42 @@ async function execute(
       assignee: "",
       adminNotes: "",
     };
-    await put(db, "sourcing", requestId, request, user.id);
+    const requestKind = scopedRecordKind(user, "sourcing");
+    await put(db, requestKind, requestId, request, user.id);
     const acc = await account(db, user);
     acc.lastSourcingReference = reference;
     await saveAccount(db, user, acc);
-    await enqueueMail(db, {
-      eventKey: `sourcing:${requestId}:received:customer`,
-      eventType: "sourcing.received",
-      recipient: user.email,
-      template: "sourcing.received",
-      data: { reference, requestId },
-    });
-    await enqueueOperationsAlert(db, {
+    if (!isTestBuyer(user)) {
+      await enqueueMail(db, {
+        eventKey: `sourcing:${requestId}:received:customer`,
+        eventType: "sourcing.received",
+        recipient: user.email,
+        template: "sourcing.received",
+        data: { reference, requestId },
+      });
+      await enqueueOperationsAlert(db, {
+        eventKey: `sourcing:${requestId}:received`,
+        eventType: "sourcing.received",
+        title: "New sourcing request",
+        message: `${user.name} submitted sourcing request ${reference}.`,
+        href: `/admin/sourcing-requests/${requestId}`,
+      });
+    }
+    await enqueueViewerNotification(db, user, {
       eventKey: `sourcing:${requestId}:received`,
-      eventType: "sourcing.received",
-      title: "New sourcing request",
-      message: `${user.name} submitted sourcing request ${reference}.`,
-      href: `/admin/sourcing-requests/${requestId}`,
+      type: "sourcing.received",
+      title: "Sourcing request received",
+      body: `${reference} is ready for review by our sourcing team.`,
+      href: `/account/sourcing-requests/${requestId}`,
     });
     return reference;
   }
   if (name === "respondToQuote") {
-    const request = await required<SourcingRequest>(db, "sourcing", a);
+    const request = await required<SourcingRequest>(
+      db,
+      scopedRecordKind(user, "sourcing"),
+      a,
+    );
     own(request.customerId, user);
     if (
       !request.quote ||
@@ -345,14 +418,20 @@ async function execute(
     request.quote.status = z.enum(["accepted", "declined"]).parse(b);
     request.quote.respondedAt = new Date().toISOString();
     request.status = request.quote.status;
-    await put(db, "sourcing", request.id, request, user.id);
+    await put(
+      db,
+      scopedRecordKind(user, "sourcing"),
+      request.id,
+      request,
+      user.id,
+    );
     return null;
   }
   if (name === "createReturn") {
     const value = z
       .object({
         orderId: s.id,
-        productId: s.id,
+        lineId: s.id,
         quantity: s.quantity,
         reason: s.short,
         detail: s.text,
@@ -366,7 +445,11 @@ async function execute(
       );
       if (!found.rows.length) throw new HttpError(400, "Attachment not found.");
     }
-    const order = await required<Order>(db, "orders", value.orderId);
+    const order = await required<Order>(
+      db,
+      scopedRecordKind(user, "orders"),
+      value.orderId,
+    );
     own(order.customerId, user);
     if (
       order.paymentStatus !== "paid" ||
@@ -376,13 +459,14 @@ async function execute(
         409,
         "Returns are available for paid, delivered orders.",
       );
-    const item = order.items.find((i) => i.productId === value.productId);
-    const returns = await records<ReturnRequest>(db, "returns", user.id);
+    const item = findOrderLine(order, value.lineId);
+    const returnKind = scopedRecordKind(user, "returns");
+    const returns = await records<ReturnRequest>(db, returnKind, user.id);
     const requested = returns
       .filter(
         (r) =>
           r.orderId === order.id &&
-          r.productId === value.productId &&
+          r.lineId === value.lineId &&
           r.status !== "rejected",
       )
       .reduce((sum, r) => sum + r.quantity, 0);
@@ -392,36 +476,50 @@ async function execute(
         "The return quantity exceeds the purchased quantity.",
       );
     const id = randomUUID();
-    const result = {
+    const result: ReturnRequest = {
       ...value,
       id,
       reference: `RT-${id.slice(0, 8)}`,
       customerId: user.id,
+      productId: item.productId,
       productName: item.name,
+      variantId: item.variantId,
+      variantLabel: item.variantLabel,
+      sku: item.sku,
       status: "requested",
       createdAt: new Date().toISOString(),
       adminNote: "",
     };
-    await put(db, "returns", id, result, user.id);
-    await enqueueMail(db, {
-      eventKey: `return:${id}:received:customer`,
-      eventType: "return.received",
-      recipient: user.email,
-      template: "return.received",
-      data: { reference: result.reference },
-    });
-    await enqueueOperationsAlert(db, {
+    await put(db, returnKind, id, result, user.id);
+    if (!isTestBuyer(user)) {
+      await enqueueMail(db, {
+        eventKey: `return:${id}:received:customer`,
+        eventType: "return.received",
+        recipient: user.email,
+        template: "return.received",
+        data: { reference: result.reference },
+      });
+      await enqueueOperationsAlert(db, {
+        eventKey: `return:${id}:received`,
+        eventType: "return.received",
+        title: "New return request",
+        message: `${user.name} submitted return ${result.reference} for order ${order.reference}.`,
+        href: "/admin/returns",
+      });
+    }
+    await enqueueViewerNotification(db, user, {
       eventKey: `return:${id}:received`,
-      eventType: "return.received",
-      title: "New return request",
-      message: `${user.name} submitted return ${result.reference} for order ${order.reference}.`,
-      href: "/admin/returns",
+      type: "return.received",
+      title: "Return request received",
+      body: `${result.reference} is awaiting review.`,
+      href: "/account/returns",
     });
     return result;
   }
   if (name === "cancelOrder") {
-    const order = await required<Order>(db, "orders", a);
-    if (order.customerId !== user.id) requireRole(user, ["Order Manager"]);
+    const orderKind = scopedRecordKind(user, "orders");
+    const order = await required<Order>(db, orderKind, a);
+    if (order.customerId !== user.id) requireCapability(user, "orders.fulfil");
     if (
       order.paymentStatus !== "pending" ||
       order.fulfillmentStatus !== "awaiting_payment"
@@ -430,45 +528,55 @@ async function execute(
         409,
         "Contact support to cancel or refund an order after payment.",
       );
-    const payment = await db.query(
-      "SELECT reference FROM payment WHERE order_id=$1",
-      [order.id],
-    );
+    const payment = isTestBuyer(user)
+      ? { rows: [] }
+      : await db.query("SELECT reference FROM payment WHERE order_id=$1", [
+          order.id,
+        ]);
     if (payment.rows.length)
       throw new HttpError(
         409,
         "A payment is in progress. Contact support for cancellation.",
       );
     order.fulfillmentStatus = "cancelled";
-    await put(db, "orders", order.id, order, order.customerId);
+    await put(db, orderKind, order.id, order, order.customerId);
     return null;
   }
-  const roles: Record<string, Parameters<typeof requireRole>[1]> = {
-    saveShippingZone: ["Order Manager"],
-    saveProduct: ["Catalog Manager"],
-    setProductStatus: ["Catalog Manager"],
-    saveCategory: ["Catalog Manager"],
-    updateCategory: ["Catalog Manager"],
-    saveVendor: ["Procurement Manager"],
-    updateShippingZone: ["Order Manager"],
-    updateSourcing: ["Procurement Manager"],
-    setSourcingStatus: ["Procurement Manager"],
-    saveQuote: ["Procurement Manager"],
-    sendQuote: ["Procurement Manager"],
-    convertQuoteToOrder: ["Procurement Manager"],
-    saveVoucher: ["Catalog Manager"],
-    toggleVoucher: ["Catalog Manager"],
-    saveBanner: ["Catalog Manager"],
-    toggleBanner: ["Catalog Manager"],
-    updateOrderStatus: ["Order Manager"],
-    updateVendorStage: ["Procurement Manager"],
-    addTeamMember: [],
-    updateTeamMember: [],
-    updateSettings: [],
-    updateReturn: ["Order Manager", "Support"],
-  };
-  if (!(name in roles)) throw new HttpError(400, "Unknown action.");
-  requireRole(user, roles[name]);
+  if (name === "resetTestData") {
+    if (!isTestBuyer(user))
+      throw new HttpError(
+        403,
+        "This action is available only in the test account.",
+      );
+    await db.query(
+      `DELETE FROM commerce_record
+       WHERE (kind='testSeedVersions' AND id=$1)
+          OR (owner_id=$1 AND kind IN ('testProducts','testVendors','testOrders','testSourcing','testReturns','testShippingZones','testNotifications'))`,
+      [user.id],
+    );
+    await db.query(
+      "DELETE FROM support_thread WHERE owner_id=$1 AND test_scope=true",
+      [user.id],
+    );
+    await put(
+      db,
+      "accounts",
+      user.id,
+      {
+        cart: [],
+        wishlist: [],
+        savedForLater: [],
+        addresses: [],
+        recentlyViewed: [],
+        location: { state: "Lagos", city: "Ikeja" },
+      },
+      user.id,
+    );
+    return { reset: true };
+  }
+  const capability = commandCapabilities[name];
+  if (!capability) throw new HttpError(400, "Unknown action.");
+  requireCapability(user, capability);
   if (name === "saveShippingZone") {
     const value = z
       .object({
@@ -486,13 +594,63 @@ async function execute(
     await put(db, "shippingZones", value.id, value);
   } else if (name === "saveProduct") {
     const value = s.product.parse(a);
-    if (
-      !(await record(db, "categories", value.categorySlug)) ||
-      !(await record(db, "vendors", value.vendorId))
-    )
+    const category = await record<{
+      active?: boolean;
+      restricted: boolean;
+    }>(db, "categories", value.categorySlug);
+    if (!category || !(await record(db, "vendors", value.vendorId)))
       throw new HttpError(400, "Select an existing category and supplier.");
+    if (
+      value.status === "published" &&
+      (category.active === false || category.restricted !== value.restricted)
+    )
+      throw new HttpError(
+        409,
+        "A published product must match an active department's visibility.",
+      );
     if (new Set(value.variants.map((v) => v.id)).size !== value.variants.length)
       throw new HttpError(400, "Variant IDs must be unique.");
+    const allSkus = [
+      value.sku.toLowerCase(),
+      ...value.variants.map((variant) => variant.sku.toLowerCase()),
+    ];
+    if (new Set(allSkus).size !== allSkus.length)
+      throw new HttpError(400, "Product and variant SKUs must be unique.");
+    const duplicateSlug = await db.query(
+      `SELECT id FROM commerce_record
+       WHERE kind='products' AND id<>$1 AND lower(data->>'slug')=lower($2)
+       LIMIT 1`,
+      [value.id, value.slug],
+    );
+    if (duplicateSlug.rows.length)
+      throw new HttpError(409, "Another product already uses this URL slug.");
+    const duplicateSku = await db.query(
+      `SELECT id FROM commerce_record
+       WHERE kind='products' AND id<>$1
+         AND (
+           lower(data->>'sku') = ANY($2::text[]) OR
+           EXISTS (
+             SELECT 1
+             FROM jsonb_array_elements(COALESCE(data->'variants','[]'::jsonb)) variant
+             WHERE lower(variant->>'sku') = ANY($2::text[])
+           )
+         )
+       LIMIT 1`,
+      [value.id, allSkus],
+    );
+    if (duplicateSku.rows.length)
+      throw new HttpError(409, "A product or variant already uses this SKU.");
+    if (
+      value.subcategorySlug &&
+      !(
+        await record<{ subcategories?: Array<{ slug: string }> }>(
+          db,
+          "categories",
+          value.categorySlug,
+        )
+      )?.subcategories?.some((item) => item.slug === value.subcategorySlug)
+    )
+      throw new HttpError(400, "Select a subcategory from this department.");
     await put(db, "products", value.id, {
       ...value,
       updatedAt: new Date().toISOString(),
@@ -511,7 +669,23 @@ async function execute(
     await put(db, "banners", value.id, value);
   } else if (name === "setProductStatus") {
     const value = await required<Product>(db, "products", a);
-    value.status = s.product.shape.status.parse(b);
+    const status = s.product.shape.status.parse(b);
+    if (status === "published") {
+      const category = await record<{
+        active?: boolean;
+        restricted: boolean;
+      }>(db, "categories", value.categorySlug);
+      if (
+        !category ||
+        category.active === false ||
+        category.restricted !== value.restricted
+      )
+        throw new HttpError(
+          409,
+          "Move this product to an active department with matching visibility before publishing.",
+        );
+    }
+    value.status = status;
     await put(db, "products", value.id, value);
   } else if (name === "updateCategory") {
     const value = await required<Record<string, unknown>>(db, "categories", a);
@@ -581,9 +755,14 @@ async function execute(
       .object({
         storeName: s.short,
         supportEmail: z.email(),
-        supportPhone: s.short,
+        supportPhone: z
+          .string()
+          .trim()
+          .regex(/^\+?[0-9 ()-]{7,25}$/, "Enter a valid support phone number."),
         businessHours: s.short,
         announcement: s.text,
+        orderNotificationEmail: z.union([z.literal(""), z.email()]),
+        supportNotificationEmail: z.union([z.literal(""), z.email()]),
       })
       .partial()
       .parse(a);
@@ -647,7 +826,19 @@ async function execute(
       eventType: "order.status_changed",
       recipient: order.customerEmail,
       template: "order.status",
-      data: { reference: order.reference, orderId: order.id, status: order.fulfillmentStatus },
+      data: {
+        reference: order.reference,
+        orderId: order.id,
+        status: order.fulfillmentStatus,
+      },
+    });
+    await enqueueNotification(db, {
+      ownerId: order.customerId,
+      eventKey: `order:${order.id}:status:${order.fulfillmentStatus}`,
+      type: "order.status_changed",
+      title: "Order status updated",
+      body: `${order.reference} is now ${order.fulfillmentStatus.replaceAll("_", " ")}.`,
+      href: `/account/orders/${order.id}`,
     });
   } else if (name === "updateVendorStage") {
     const order = await required<Order>(db, "orders", a);
@@ -702,6 +893,14 @@ async function execute(
         template: "return.status",
         data: { reference: value.reference, status: value.status },
       });
+    await enqueueNotification(db, {
+      ownerId: value.customerId,
+      eventKey: `return:${value.id}:status:${value.status}`,
+      type: "return.status_changed",
+      title: "Return status updated",
+      body: `${value.reference} is now ${value.status.replaceAll("_", " ")}.`,
+      href: "/account/returns",
+    });
   } else {
     const request = await required<SourcingRequest>(db, "sourcing", a);
     if (name === "saveQuote") {
@@ -733,8 +932,21 @@ async function execute(
         eventType: "sourcing.quote_sent",
         recipient: request.email,
         template: "sourcing.quote",
-        data: { reference: request.reference, requestId: request.id, validUntil: request.quote.validUntil },
+        data: {
+          reference: request.reference,
+          requestId: request.id,
+          validUntil: request.quote.validUntil,
+        },
       });
+      if (request.customerId)
+        await enqueueNotification(db, {
+          ownerId: request.customerId,
+          eventKey: `sourcing:${request.id}:quote:${request.quote.sentAt}`,
+          type: "sourcing.quote_sent",
+          title: "Your sourcing quote is ready",
+          body: `${request.reference} is waiting for your response.`,
+          href: `/account/sourcing-requests/${request.id}`,
+        });
     }
     if (name === "updateSourcing" || name === "setSourcingStatus") {
       const patch = z
@@ -770,7 +982,10 @@ async function execute(
         fulfillmentStatus: "awaiting_payment",
         paymentMethod: "paystack",
         items: request.quote.lines.map((l) => ({
+          lineId: randomUUID(),
           productId: `${request.id}-${l.id}`,
+          variantId: l.id,
+          sku: `SOURCED-${request.reference}-${l.id}`,
           name: l.description,
           variantLabel: "Sourced to request",
           image: "/favicon.svg",

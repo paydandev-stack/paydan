@@ -35,7 +35,7 @@ export function SiteFooter() {
         <div className="footer-brand">
           <img
             src="/paydan-logo.png"
-            alt="Paydan"
+            alt={state.settings.storeName}
             width={3000}
             height={3223}
           />
@@ -55,7 +55,9 @@ export function SiteFooter() {
         </div>
 
         <details className="footer-links">
-          <summary>Departments <span aria-hidden="true">+</span></summary>
+          <summary>
+            Departments <span aria-hidden="true">+</span>
+          </summary>
           <div>
             {departments.map((department) => (
               <Link key={department.slug} href={`/category/${department.slug}`}>
@@ -66,7 +68,9 @@ export function SiteFooter() {
         </details>
 
         <details className="footer-links">
-          <summary>Customer care <span aria-hidden="true">+</span></summary>
+          <summary>
+            Customer care <span aria-hidden="true">+</span>
+          </summary>
           <div>
             {careLinks.map((link) => (
               <Link key={link.href} href={link.href}>
@@ -77,7 +81,9 @@ export function SiteFooter() {
         </details>
 
         <details className="footer-links">
-          <summary>Paydan <span aria-hidden="true">+</span></summary>
+          <summary>
+            {state.settings.storeName} <span aria-hidden="true">+</span>
+          </summary>
           <div>
             {companyLinks.map((link) => (
               <Link key={link.href} href={link.href}>

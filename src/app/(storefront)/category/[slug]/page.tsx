@@ -30,6 +30,7 @@ export default function CategoryPage() {
       title={category.title}
       description={category.description}
       products={products}
+      serverQuery={{ department: category.slug }}
       emptyTitle={`No ${category.name.toLowerCase()} products published yet`}
       emptyMessage="This department is being stocked. Send a sourcing request and Paydan's team will find a supplier for the exact item you need."
     />

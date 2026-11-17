@@ -97,15 +97,50 @@ const STOPWORDS = new Set([
  */
 const PRODUCT_QUERY_FILLERS = new Set([
   ...STOPWORDS,
-  "me", "my", "some", "any", "kind", "kinds", "type", "types",
-  "available", "availability", "options", "option", "best", "good", "better",
-  "cheap", "affordable", "expensive", "under", "over", "around", "below", "above",
-  "recommendation", "recommendations", "price", "prices", "much", "please",
-  "could", "would", "should", "like", "just", "more", "one", "ones", "items", "item",
+  "me",
+  "my",
+  "some",
+  "any",
+  "kind",
+  "kinds",
+  "type",
+  "types",
+  "available",
+  "availability",
+  "options",
+  "option",
+  "best",
+  "good",
+  "better",
+  "cheap",
+  "affordable",
+  "expensive",
+  "under",
+  "over",
+  "around",
+  "below",
+  "above",
+  "recommendation",
+  "recommendations",
+  "price",
+  "prices",
+  "much",
+  "please",
+  "could",
+  "would",
+  "should",
+  "like",
+  "just",
+  "more",
+  "one",
+  "ones",
+  "items",
+  "item",
 ]);
 
 function normalizeWord(value: string): string {
-  if (value.endsWith("ies") && value.length > 4) return `${value.slice(0, -3)}y`;
+  if (value.endsWith("ies") && value.length > 4)
+    return `${value.slice(0, -3)}y`;
   if (value.endsWith("s") && !value.endsWith("ss") && value.length > 3)
     return value.slice(0, -1);
   return value;
@@ -116,23 +151,76 @@ function wordList(value: string): string[] {
 }
 
 function tokens(value: string): string[] {
-  return wordList(value).filter((token) => token.length > 1 && !PRODUCT_QUERY_FILLERS.has(token));
+  return wordList(value).filter(
+    (token) => token.length > 1 && !PRODUCT_QUERY_FILLERS.has(token),
+  );
 }
 
 const FOOTWEAR = new Set([
-  "shoe", "sneaker", "trainer", "boot", "sandal", "slipper", "loafer",
-  "heel", "footwear", "flat", "cleat",
+  "shoe",
+  "sneaker",
+  "trainer",
+  "boot",
+  "sandal",
+  "slipper",
+  "loafer",
+  "heel",
+  "footwear",
+  "flat",
+  "cleat",
 ]);
 const VEHICLES = new Set([
-  "car", "vehicle", "automobile", "sedan", "suv", "hatchback", "coupe",
-  "convertible", "crossover", "truck", "minivan",
+  "car",
+  "vehicle",
+  "automobile",
+  "sedan",
+  "suv",
+  "hatchback",
+  "coupe",
+  "convertible",
+  "crossover",
+  "truck",
+  "minivan",
 ]);
-const SMARTPHONES = new Set(["phone", "smartphone", "iphone", "mobile", "handset"]);
-const BAGS = new Set(["bag", "handbag", "purse", "tote", "carryall", "backpack", "satchel"]);
+const SMARTPHONES = new Set([
+  "phone",
+  "smartphone",
+  "iphone",
+  "mobile",
+  "handset",
+]);
+const BAGS = new Set([
+  "bag",
+  "handbag",
+  "purse",
+  "tote",
+  "carryall",
+  "backpack",
+  "satchel",
+]);
 const VEHICLE_ACCESSORIES = new Set([
-  "care", "detail", "wash", "cleaner", "polish", "wax", "charger", "charging",
-  "cover", "mat", "battery", "oil", "tire", "tyre", "accessory", "freshener",
-  "holder", "mount", "keychain", "part", "kit", "tool",
+  "care",
+  "detail",
+  "wash",
+  "cleaner",
+  "polish",
+  "wax",
+  "charger",
+  "charging",
+  "cover",
+  "mat",
+  "battery",
+  "oil",
+  "tire",
+  "tyre",
+  "accessory",
+  "freshener",
+  "holder",
+  "mount",
+  "keychain",
+  "part",
+  "kit",
+  "tool",
 ]);
 
 /** Remove shopping chatter; useful when searching `what of some shoes?`. */
@@ -155,13 +243,17 @@ function overlaps(a: Set<string>, b: Set<string>): boolean {
 
 function productScore(product: Product, queryTokens: string[]): number {
   const name = new Set(wordList(product.name));
-  const content = new Set(wordList([
-    product.brand,
-    product.description,
-    ...(product.highlights || []),
-    ...Object.keys(product.specifications || {}),
-    ...Object.values(product.specifications || {}),
-  ].join(" ")));
+  const content = new Set(
+    wordList(
+      [
+        product.brand,
+        product.description,
+        ...(product.highlights || []),
+        ...Object.keys(product.specifications || {}),
+        ...Object.values(product.specifications || {}),
+      ].join(" "),
+    ),
+  );
   const category = new Set(wordList(product.categorySlug));
 
   // A request for a car is not a request for car shampoo or spare parts.
@@ -173,7 +265,14 @@ function productScore(product: Product, queryTokens: string[]): number {
   // `shoes-and-bags` is a mixed department: bags are not footwear.
   if (queryTokens.some((token) => FOOTWEAR.has(token))) {
     if (!overlaps(name, FOOTWEAR) && !overlaps(content, FOOTWEAR)) return 0;
-    if (overlaps(name, new Set(["bag", "handbag", "carryall", "tote", "purse"])) && !overlaps(name, FOOTWEAR)) return 0;
+    if (
+      overlaps(
+        name,
+        new Set(["bag", "handbag", "carryall", "tote", "purse"]),
+      ) &&
+      !overlaps(name, FOOTWEAR)
+    )
+      return 0;
   }
 
   // `shoes-and-bags` is a mixed department: sneakers are not handbags.
@@ -184,17 +283,42 @@ function productScore(product: Product, queryTokens: string[]): number {
 
   // Search for phones must not silently return headphones or phone accessories.
   if (queryTokens.length === 1 && SMARTPHONES.has(queryTokens[0])) {
-    if (!overlaps(name, SMARTPHONES) && !overlaps(content, SMARTPHONES)) return 0;
-    if (overlaps(name, new Set(["case", "charger", "cover", "cable", "holder", "headphone", "earphone", "earbud"]))) return 0;
+    if (!overlaps(name, SMARTPHONES) && !overlaps(content, SMARTPHONES))
+      return 0;
+    if (
+      overlaps(
+        name,
+        new Set([
+          "case",
+          "charger",
+          "cover",
+          "cable",
+          "holder",
+          "headphone",
+          "earphone",
+          "earbud",
+        ]),
+      )
+    )
+      return 0;
   }
 
   let total = 0;
   let matched = 0;
   for (const token of queryTokens) {
     const terms = relatedTerms(token);
-    if (overlaps(name, terms)) { total += 6; matched++; }
-    else if (overlaps(content, terms)) { total += 2; matched++; }
-    else if (overlaps(category, terms) && !FOOTWEAR.has(token) && !VEHICLES.has(token) && !BAGS.has(token)) {
+    if (overlaps(name, terms)) {
+      total += 6;
+      matched++;
+    } else if (overlaps(content, terms)) {
+      total += 2;
+      matched++;
+    } else if (
+      overlaps(category, terms) &&
+      !FOOTWEAR.has(token) &&
+      !VEHICLES.has(token) &&
+      !BAGS.has(token)
+    ) {
       total += 1;
       matched++;
     }
@@ -215,12 +339,19 @@ export function searchRelevantProducts(
   return products
     .map((product) => ({ product, score: productScore(product, queryTokens) }))
     .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name))
+    .sort(
+      (a, b) =>
+        b.score - a.score || a.product.name.localeCompare(b.product.name),
+    )
     .slice(0, limit)
     .map(({ product }) => product);
 }
 
-function searchProducts(query: string, products: Product[], limit = 4): Product[] {
+function searchProducts(
+  query: string,
+  products: Product[],
+  limit = 4,
+): Product[] {
   return searchRelevantProducts(query, products, limit);
 }
 
@@ -414,12 +545,14 @@ export function answerFor(
 
   // 8. Support.
   const shoppingIntent =
-  /\b(find|search|show|browse|buy|shop|recommend|compare|looking for)\b/.test(q);
+    /\b(find|search|show|browse|buy|shop|recommend|compare|looking for)\b/.test(
+      q,
+    );
 
-if (
-  !shoppingIntent &&
-  /\b(help|support|contact|human|agent|person|email|call you)\b/.test(q)
-) {
+  if (
+    !shoppingIntent &&
+    /\b(help|support|contact|human|agent|person|email|call you)\b/.test(q)
+  ) {
     return {
       text: "For an existing order or account question, support can pick it up directly. The help centre covers the common cases first.",
       links: [

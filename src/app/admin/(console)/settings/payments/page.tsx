@@ -2,12 +2,21 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 export default function Payments() {
-  const [services, setServices] = useState<Record<string, string | boolean>>(
-    {},
-  );
+  const [services, setServices] = useState<
+    Record<
+      string,
+      { status: string; checkedAt?: string; mode?: string; message?: string }
+    >
+  >({});
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    void api<Record<string, string | boolean>>("/api/admin/services")
+    void api<
+      Record<
+        string,
+        { status: string; checkedAt?: string; mode?: string; message?: string }
+      >
+    >("/api/admin/services")
       .then(setServices)
       .catch((e) => setError(e.message));
   }, []);
@@ -19,24 +28,43 @@ export default function Payments() {
         environment and are never shown here.
       </p>
       {error && <p role="alert">{error}</p>}
+      <button
+        className="admin-btn"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            setServices(await api("/api/admin/services", { action: "verify" }));
+          } catch (reason) {
+            setError((reason as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Checking…" : "Run safe connectivity checks"}
+      </button>
       <div className="operations-list">
         {Object.entries(services).map(([name, status]) => (
           <article key={name}>
             <strong>{name}</strong>
             <p>
-              {typeof status === "boolean"
-                ? status
-                  ? "Configured"
-                  : "Not configured"
-                : status}
+              {status.status.replaceAll("_", " ")}
+              {status.mode ? ` · ${status.mode}` : ""}
             </p>
+            {status.checkedAt ? (
+              <small>
+                Checked {new Date(status.checkedAt).toLocaleString()}
+              </small>
+            ) : null}
+            {status.message ? <small>{status.message}</small> : null}
           </article>
         ))}
       </div>
       <p>
-        Configuration status does not verify connectivity. Complete test
-        transactions, webhook delivery and refund verification before switching
-        Paystack to live mode.
+        Connectivity checks are side-effect free. Complete real OAuth,
+        transaction, webhook, email-delivery and refund acceptance tests before
+        switching Paystack to live mode.
       </p>
     </>
   );

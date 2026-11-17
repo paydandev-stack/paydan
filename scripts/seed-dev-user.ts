@@ -3,10 +3,16 @@ import { randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { database, transaction, put } from "../src/server/db";
 
-type SeedUser = { name: string; email: string; password: string; admin?: boolean };
+type SeedUser = {
+  name: string;
+  email: string;
+  password: string;
+  admin?: boolean;
+};
 
 async function ensureUser(user: SeedUser) {
-  if (!user.email || !user.email.includes("@")) throw new Error("Invalid seed email.");
+  if (!user.email || !user.email.includes("@"))
+    throw new Error("Invalid seed email.");
   if (!user.password || user.password.length < 12)
     throw new Error("Seed password must be at least 12 characters.");
   const now = new Date();
@@ -91,7 +97,10 @@ async function ensureUser(user: SeedUser) {
 
 async function main() {
   loadEnvConfig(process.cwd());
-  if (process.env.NODE_ENV === "production" && process.env.ALLOW_LOCAL_SEED !== "true") {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_LOCAL_SEED !== "true"
+  ) {
     throw new Error(
       "Refusing to seed users in production. Set ALLOW_LOCAL_SEED=true only for controlled local/test environments.",
     );
@@ -112,7 +121,9 @@ async function main() {
   ];
 
   for (const user of users) await ensureUser(user);
-  console.log("Local test users are ready. Sign in at /login (email+password).");
+  console.log(
+    "Local test users are ready. Sign in at /login (email+password).",
+  );
   await database().end();
 }
 

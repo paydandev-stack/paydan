@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
 import { SlidersIcon } from "@/components/icons";
 import { plural } from "@/lib/format";
 import { toViewerProducts } from "@/lib/catalog-dto";
 import { availabilityMeta } from "@/lib/status";
 import { useDemo } from "@/lib/store";
+import { api } from "@/lib/api-client";
 import type { Availability, Category, Product } from "@/lib/types";
 
 type Crumb = { href?: string; label: string };
@@ -62,6 +64,11 @@ export type CatalogViewProps = {
   departments?: Category[];
   emptyTitle?: string;
   emptyMessage?: string;
+  serverQuery?: {
+    q?: string;
+    department?: string;
+    collection?: "all" | "deals" | "new-arrivals" | "featured";
+  };
 };
 
 /**
@@ -77,16 +84,45 @@ export function CatalogView({
   departments,
   emptyTitle = "Nothing matches those filters",
   emptyMessage = "Try clearing a filter, or request the product and our sourcing team will look for it.",
+  serverQuery,
 }: CatalogViewProps) {
-  const [department, setDepartment] = useState<string>("all");
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [bands, setBands] = useState<string[]>([]);
-  const [brands, setBrands] = useState<string[]>([]);
-  const [sort, setSort] = useState<SortKey>("featured");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [department, setDepartment] = useState<string>(
+    searchParams.get("department") || "all",
+  );
+  const [availability, setAvailability] = useState<Availability[]>(() =>
+    (searchParams.get("availability") ?? "")
+      .split(",")
+      .filter((value): value is Availability =>
+        availabilityOrder.includes(value as Availability),
+      ),
+  );
+  const [bands, setBands] = useState<string[]>(() =>
+    (searchParams.get("priceBands") ?? "").split(",").filter(Boolean),
+  );
+  const [brands, setBrands] = useState<string[]>(() =>
+    (searchParams.get("brands") ?? "").split(",").filter(Boolean),
+  );
+  const [sort, setSort] = useState<SortKey>(() => {
+    const value = searchParams.get("sort") as SortKey | null;
+    return sortOptions.some((option) => option.value === value)
+      ? value!
+      : "featured";
+  });
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   const { state } = useDemo();
   const signedIn = Boolean(state.customerSession);
+  const useRemote = Boolean(serverQuery) && state.dataScope !== "test";
+  const [remoteProducts, setRemoteProducts] = useState<Product[]>([]);
+  const [remoteTotal, setRemoteTotal] = useState(0);
+  const [remoteCursor, setRemoteCursor] = useState<string | null>(null);
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteError, setRemoteError] = useState("");
+  const requestVersion = useRef(0);
 
   /**
    * Anonymous surfaces carry no money at all: price filters and price sort
@@ -99,12 +135,75 @@ export function CatalogView({
   const effectiveSort: SortKey =
     signedIn || !sort.startsWith("price-") ? sort : "featured";
 
+  const fetchRemote = useCallback(
+    async (cursor?: string, append = false) => {
+      if (!useRemote) return;
+      const version = ++requestVersion.current;
+      const params = new URLSearchParams({
+        sort: effectiveSort,
+        collection: serverQuery?.collection ?? "all",
+        limit: "24",
+      });
+      const effectiveDepartment =
+        department !== "all" ? department : serverQuery?.department;
+      if (effectiveDepartment) params.set("department", effectiveDepartment);
+      if (serverQuery?.q) params.set("q", serverQuery.q);
+      if (availability.length)
+        params.set("availability", availability.join(","));
+      if (brands.length) params.set("brands", brands.join(","));
+      if (signedIn && bands.length) params.set("priceBands", bands.join(","));
+      if (cursor) params.set("cursor", cursor);
+      setRemoteLoading(true);
+      setRemoteError("");
+      try {
+        const page = await api<{
+          products: Product[];
+          total: number;
+          nextCursor: string | null;
+        }>(`/api/products?${params}`);
+        if (version !== requestVersion.current) return;
+        setRemoteProducts((current) =>
+          append ? [...current, ...page.products] : page.products,
+        );
+        setRemoteTotal(page.total);
+        setRemoteCursor(page.nextCursor);
+        setRemoteLoaded(true);
+      } catch (error) {
+        if (version !== requestVersion.current) return;
+        setRemoteError(
+          error instanceof Error ? error.message : "Unable to load products.",
+        );
+        setRemoteLoaded(false);
+      } finally {
+        if (version === requestVersion.current) setRemoteLoading(false);
+      }
+    },
+    [
+      availability,
+      bands,
+      brands,
+      department,
+      effectiveSort,
+      serverQuery?.collection,
+      serverQuery?.department,
+      serverQuery?.q,
+      signedIn,
+      useRemote,
+    ],
+  );
+
+  useEffect(() => {
+    if (useRemote) void fetchRemote();
+  }, [fetchRemote, useRemote]);
+
+  const sourceProducts = useRemote && remoteLoaded ? remoteProducts : products;
   const brandOptions = useMemo(
-    () => [...new Set(products.map((product) => product.brand))].sort(),
-    [products],
+    () => [...new Set(sourceProducts.map((product) => product.brand))].sort(),
+    [sourceProducts],
   );
 
   const results = useMemo(() => {
+    if (useRemote) return sourceProducts;
     const activeBands = signedIn
       ? priceBands.filter((band) => bands.includes(band.id))
       : [];
@@ -149,6 +248,8 @@ export function CatalogView({
     return sorted;
   }, [
     products,
+    sourceProducts,
+    useRemote,
     department,
     availability,
     bands,
@@ -165,6 +266,34 @@ export function CatalogView({
     () => toViewerProducts(results, { pricesVisible: signedIn }),
     [results, signedIn],
   );
+  const renderedPage = useRemote ? rendered : rendered.slice(0, page * 24);
+
+  useEffect(() => {
+    setPage(1);
+    const params = new URLSearchParams(searchParams.toString());
+    if (department === "all") params.delete("department");
+    else params.set("department", department);
+    if (effectiveSort === "featured") params.delete("sort");
+    else params.set("sort", effectiveSort);
+    if (availability.length) params.set("availability", availability.join(","));
+    else params.delete("availability");
+    if (brands.length) params.set("brands", brands.join(","));
+    else params.delete("brands");
+    if (signedIn && bands.length) params.set("priceBands", bands.join(","));
+    else params.delete("priceBands");
+    const next = params.toString();
+    if (next !== searchParams.toString())
+      router.replace(next ? `?${next}` : "?", { scroll: false });
+  }, [
+    availability,
+    bands,
+    brands,
+    department,
+    effectiveSort,
+    router,
+    searchParams,
+    signedIn,
+  ]);
 
   const categoryName = (slug: string) =>
     departments?.find((item) => item.slug === slug)?.name ?? "";
@@ -239,8 +368,14 @@ export function CatalogView({
 
       <div className="catalog-toolbar">
         <span>
-          {plural(results.length, "product")} ·{" "}
-          {plural(products.length, "result")} in this view
+          {plural(
+            useRemote && remoteLoaded ? remoteTotal : results.length,
+            "product",
+          )}{" "}
+          ·{" "}
+          {useRemote
+            ? "server-filtered"
+            : `${plural(products.length, "result")} in this view`}
         </span>
         <label>
           Sort by
@@ -255,16 +390,29 @@ export function CatalogView({
             ))}
           </select>
         </label>
-        <button type="button" className="catalog-filter-trigger" onClick={() => setFiltersOpen(true)}>
+        <button
+          type="button"
+          className="catalog-filter-trigger"
+          onClick={() => setFiltersOpen(true)}
+        >
           <SlidersIcon /> Filters{filterCount ? ` (${filterCount})` : ""}
         </button>
       </div>
 
       <div className="catalog-layout">
-        <aside className={filtersOpen ? "catalog-filters open" : "catalog-filters"} aria-label="Filters">
+        <aside
+          className={filtersOpen ? "catalog-filters open" : "catalog-filters"}
+          aria-label="Filters"
+        >
           <div className="catalog-filter-head">
             <strong>Filter products</strong>
-            <button type="button" onClick={() => setFiltersOpen(false)} aria-label="Close filters">×</button>
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(false)}
+              aria-label="Close filters"
+            >
+              ×
+            </button>
           </div>
           <SlidersIcon />
           <strong>Filters{filterCount ? ` (${filterCount})` : ""}</strong>
@@ -325,14 +473,28 @@ export function CatalogView({
           >
             Clear filters
           </button>
-          <button type="button" className="catalog-apply" onClick={() => setFiltersOpen(false)}>Show {plural(results.length, "product")}</button>
+          <button
+            type="button"
+            className="catalog-apply"
+            onClick={() => setFiltersOpen(false)}
+          >
+            Show {plural(results.length, "product")}
+          </button>
         </aside>
-        {filtersOpen ? <button type="button" className="sheet-backdrop" aria-label="Close filters" onClick={() => setFiltersOpen(false)} /> : null}
+        {filtersOpen ? (
+          <button
+            type="button"
+            className="sheet-backdrop"
+            aria-label="Close filters"
+            onClick={() => setFiltersOpen(false)}
+          />
+        ) : null}
 
         <div>
+          {remoteError ? <p className="form-error">{remoteError}</p> : null}
           {results.length ? (
             <div className="product-grid catalog-grid">
-              {rendered.map((product) => (
+              {renderedPage.map((product) => (
                 <ProductCard
                   key={product.id}
                   product={product}
@@ -348,6 +510,24 @@ export function CatalogView({
               <Link href="/request-product">Request a product instead</Link>
             </div>
           )}
+          {useRemote && remoteCursor ? (
+            <button
+              className="catalog-apply"
+              type="button"
+              disabled={remoteLoading}
+              onClick={() => void fetchRemote(remoteCursor, true)}
+            >
+              {remoteLoading ? "Loading…" : "Load more products"}
+            </button>
+          ) : !useRemote && renderedPage.length < rendered.length ? (
+            <button
+              className="catalog-apply"
+              type="button"
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Load more products
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

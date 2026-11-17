@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import { AdminEmpty, AdminTable } from "@/components/admin/data-table";
 import type { FulfillmentStatus } from "@/lib/types";
 import { compactMoney, money, plural } from "@/lib/format";
 import { fulfillmentStatusMeta } from "@/lib/status";
+import { api } from "@/lib/api-client";
 
 const MONTH_LABELS = [
   "Jan",
@@ -40,24 +42,59 @@ const FULFILMENT_ROWS: { status: FulfillmentStatus; tone: string }[] = [
 /** Read-only growth report: every figure is derived from authorized store records. */
 export default function AdminAnalyticsPage() {
   const { state } = useDemo();
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [refunds, setRefunds] = useState({
+    processedRefunds: 0,
+    processedRefundCount: 0,
+    pendingRefundCount: 0,
+  });
+  useEffect(() => {
+    const query = new URLSearchParams();
+    if (from) query.set("from", from);
+    if (to) query.set("to", to);
+    void api<typeof refunds>(`/api/admin/analytics?${query}`).then(setRefunds);
+  }, [from, to]);
 
-  const paidOrders = state.orders.filter(
-    (order) => order.paymentStatus === "paid",
+  const inPeriod = (value: string) => {
+    const time = Date.parse(value);
+    return (
+      (!from || time >= Date.parse(`${from}T00:00:00Z`)) &&
+      (!to || time < Date.parse(`${to}T00:00:00Z`) + 86_400_000)
+    );
+  };
+  const periodOrders = state.orders.filter((order) => inPeriod(order.placedAt));
+  const periodSourcing = state.sourcing.filter((request) =>
+    inPeriod(request.submittedAt),
+  );
+  const periodReturns = state.returns.filter((request) =>
+    inPeriod(request.createdAt),
+  );
+
+  const paidOrders = periodOrders.filter((order) =>
+    ["paid", "refunded"].includes(order.paymentStatus),
   );
   const paidRevenue = paidOrders.reduce((sum, order) => sum + order.total, 0);
+  const netRevenue = Math.max(0, paidRevenue - refunds.processedRefunds);
   const averagePaidOrder = paidOrders.length
     ? Math.round(paidRevenue / paidOrders.length)
     : 0;
 
-  const convertedRequests = state.sourcing.filter(
+  const convertedRequests = periodSourcing.filter(
     (request) => request.status === "converted",
   );
-  const conversionRate = state.sourcing.length
-    ? Math.round((convertedRequests.length / state.sourcing.length) * 100)
+  const conversionRate = periodSourcing.length
+    ? Math.round((convertedRequests.length / periodSourcing.length) * 100)
+    : 0;
+  const pendingPaymentAmount = periodOrders
+    .filter((order) => order.paymentStatus === "pending")
+    .reduce((sum, order) => sum + order.total, 0);
+  const returnRate = paidOrders.length
+    ? Math.round((periodReturns.length / paidOrders.length) * 100)
     : 0;
 
   const ordersPerCustomer = new Map<string, number>();
-  for (const order of state.orders) {
+  for (const order of paidOrders) {
     ordersPerCustomer.set(
       order.customerId,
       (ordersPerCustomer.get(order.customerId) ?? 0) + 1,
@@ -79,18 +116,18 @@ export default function AdminAnalyticsPage() {
   const peakMonth = months.reduce((max, [, sum]) => Math.max(max, sum), 0);
 
   const fulfillmentCounts = new Map<FulfillmentStatus, number>();
-  for (const order of state.orders) {
+  for (const order of periodOrders) {
     fulfillmentCounts.set(
       order.fulfillmentStatus,
       (fulfillmentCounts.get(order.fulfillmentStatus) ?? 0) + 1,
     );
   }
 
-  // Top categories by item count across every order line.
+  // Top categories by item count across paid/refunded order lines only.
   const categoryItems = new Map<string, number>();
   const categoryRevenue = new Map<string, number>();
   const categoryOrders = new Map<string, Set<string>>();
-  for (const order of state.orders) {
+  for (const order of paidOrders) {
     for (const item of order.items) {
       categoryItems.set(
         item.categorySlug,
@@ -118,7 +155,7 @@ export default function AdminAnalyticsPage() {
   const vendorGroups = new Map<string, number>();
   const vendorOpenGroups = new Map<string, number>();
   const vendorOrders = new Map<string, Set<string>>();
-  for (const order of state.orders) {
+  for (const order of periodOrders) {
     for (const group of order.vendorGroups) {
       vendorGroups.set(
         group.vendorId,
@@ -165,6 +202,37 @@ export default function AdminAnalyticsPage() {
         }
       />
 
+      <div className="admin-filters">
+        <label>
+          From
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(event) => setFrom(event.target.value)}
+          />
+        </label>
+        <label>
+          To
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(event) => setTo(event.target.value)}
+          />
+        </label>
+        <button
+          className="admin-btn quiet"
+          type="button"
+          onClick={() => {
+            setFrom("");
+            setTo("");
+          }}
+        >
+          All time
+        </button>
+      </div>
+
       <AdminKpis
         items={[
           {
@@ -173,9 +241,14 @@ export default function AdminAnalyticsPage() {
             note: "Sum of orders marked paid",
           },
           {
-            label: "Total orders",
-            value: state.orders.length,
-            note: `${paidOrders.length} marked paid`,
+            label: "Processed refunds",
+            value: money(refunds.processedRefunds),
+            note: `${refunds.processedRefundCount} processed · ${refunds.pendingRefundCount} pending`,
+          },
+          {
+            label: "Net revenue",
+            value: money(netRevenue),
+            note: "Gross paid revenue minus processed refunds",
           },
           {
             label: "Average paid order",
@@ -183,9 +256,19 @@ export default function AdminAnalyticsPage() {
             note: "Paid total ÷ paid orders",
           },
           {
+            label: "Pending payment amount",
+            value: money(pendingPaymentAmount),
+            note: "Orders awaiting verified payment",
+          },
+          {
+            label: "Return rate",
+            value: `${returnRate}%`,
+            note: `${periodReturns.length} requests ÷ ${paidOrders.length} paid orders`,
+          },
+          {
             label: "Sourcing conversion",
             value: `${conversionRate}%`,
-            note: `${convertedRequests.length} of ${state.sourcing.length} requests converted`,
+            note: `${convertedRequests.length} of ${periodSourcing.length} requests converted`,
           },
           {
             label: "Repeat customers",
@@ -256,7 +339,7 @@ export default function AdminAnalyticsPage() {
             ))}
             <div>
               <span className="neutral">All orders</span>
-              <strong>{state.orders.length}</strong>
+              <strong>{periodOrders.length}</strong>
             </div>
           </div>
           <p

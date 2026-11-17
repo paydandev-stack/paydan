@@ -1,66 +1,120 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
+import { AdminPageHeader } from "@/components/admin/page-header";
+import { formatDateTime } from "@/lib/format";
+
 type Ticket = {
   id: string;
   subject: string;
-  message: string;
   email: string;
   status: string;
+  assignee: string | null;
+  updatedAt: string;
+  messages: Array<{
+    id: string;
+    authorType: "customer" | "staff";
+    body: string;
+    createdAt: string;
+  }>;
 };
+
 export default function Support() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [reply, setReply] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function load() {
+  const [busy, setBusy] = useState("");
+  const load = useCallback(async () => {
     setTickets(await api<Ticket[]>("/api/admin/support"));
-  }
-  useEffect(() => {
-    void load().catch((e) => setError(e.message));
   }, []);
-  async function send(id: string) {
-    setBusy(true);
+  useEffect(() => {
+    void load().catch((reason) => setError((reason as Error).message));
+  }, [load]);
+  async function update(id: string, status?: string) {
+    setBusy(id);
+    setError("");
     try {
-      await api("/api/admin/support", { id, reply: reply[id] });
+      await api("/api/admin/support", {
+        id,
+        reply: reply[id]?.trim() || undefined,
+        status,
+      });
+      setReply((current) => ({ ...current, [id]: "" }));
       await load();
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (reason) {
+      setError((reason as Error).message);
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
   return (
     <>
-      <h1>Support inbox</h1>
-      <p role="status">{error}</p>
-      {!tickets.length && <p>No support messages.</p>}
+      <AdminPageHeader
+        eyebrow="Customer care"
+        title="Support inbox"
+        description="Append-only customer conversations with ownership-safe replies."
+      />
+      {error ? <p className="form-error">{error}</p> : null}
+      {!tickets.length ? <p>No support conversations.</p> : null}
       <div className="operations-list">
-        {tickets.map((t) => (
-          <article key={t.id}>
-            <h2>{t.subject}</h2>
+        {tickets.map((ticket) => (
+          <article key={ticket.id}>
+            <h2>{ticket.subject}</h2>
             <p>
-              {t.email} · {t.status}
+              {ticket.email} · {ticket.status.replaceAll("_", " ")} ·{" "}
+              {ticket.assignee || "Unassigned"}
             </p>
-            <p>{t.message}</p>
-            {t.status === "open" && (
+            {ticket.messages.map((message) => (
+              <div className="queue-item" key={message.id}>
+                <span>
+                  <strong>
+                    {message.authorType === "staff" ? "PAYDAN" : "Customer"}
+                  </strong>
+                  <br />
+                  {message.body}
+                </span>
+                <span>{formatDateTime(message.createdAt)}</span>
+              </div>
+            ))}
+            {ticket.status !== "resolved" ? (
               <>
                 <label>
                   Reply
                   <textarea
-                    value={reply[t.id] ?? ""}
-                    onChange={(e) =>
-                      setReply({ ...reply, [t.id]: e.target.value })
+                    value={reply[ticket.id] ?? ""}
+                    onChange={(event) =>
+                      setReply((current) => ({
+                        ...current,
+                        [ticket.id]: event.target.value,
+                      }))
                     }
                   />
                 </label>
-                <button
-                  disabled={busy || !reply[t.id]?.trim()}
-                  onClick={() => void send(t.id)}
-                >
-                  Send email reply
-                </button>
+                <div className="admin-actions">
+                  <button
+                    disabled={busy === ticket.id || !reply[ticket.id]?.trim()}
+                    onClick={() => void update(ticket.id)}
+                  >
+                    Send reply
+                  </button>
+                  <button
+                    className="admin-btn quiet"
+                    disabled={busy === ticket.id}
+                    onClick={() => void update(ticket.id, "resolved")}
+                  >
+                    Resolve
+                  </button>
+                </div>
               </>
+            ) : (
+              <button
+                className="admin-btn quiet"
+                disabled={busy === ticket.id}
+                onClick={() => void update(ticket.id, "open")}
+              >
+                Reopen
+              </button>
             )}
           </article>
         ))}

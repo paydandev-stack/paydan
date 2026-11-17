@@ -1,6 +1,7 @@
 import type { DemoState } from "./types";
 export function emptyState(): DemoState {
   return {
+    dataScope: "production",
     products: [],
     categories: [],
     vendors: [],
@@ -17,6 +18,8 @@ export function emptyState(): DemoState {
     savedForLater: [],
     addresses: [],
     audit: [],
+    notifications: [],
+    recentlyViewed: [],
     customerSession: null,
     adminSession: null,
     location: { state: "Lagos", city: "" },

@@ -57,10 +57,22 @@ import { chat, confirmAssistantProposal } from "../src/server/assistant";
 import { assistantConfig } from "../src/server/assistant/config";
 import { cloudFrontObjectUrl } from "../src/server/cloudfront";
 import { enqueueMail } from "../src/server/mail/queue";
+import {
+  enqueueViewerNotification,
+  testNotificationsFor,
+} from "../src/server/notifications";
 import { checkout, image, kobo } from "../src/server/schemas";
 import { safePath } from "../src/lib/intent";
+import {
+  isCustomerVisibleCategory,
+  isCustomerVisibleProduct,
+  isPurchasableVariant,
+} from "../src/lib/catalog-visibility";
+import { hasCapability } from "../src/lib/capabilities";
 import type { Order, Product } from "../src/lib/types";
 import { getMigrations } from "better-auth/db/migration";
+import { GET as listProducts } from "../src/app/api/products/route";
+import { GET as productDetail } from "../src/app/api/products/[slug]/route";
 
 const alice = { id: "alice", email: "alice@example.com", name: "Alice" };
 const bob = { id: "bob", email: "bob@example.com", name: "Bob" };
@@ -139,6 +151,7 @@ beforeAll(async () => {
     "002_inventory.sql",
     "004_assistant_proposals.sql",
     "005_mail_outbox_upgrade.sql",
+    "006_operational_completion.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
@@ -146,7 +159,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await harness.db.exec(
-    "TRUNCATE commerce_record,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression",
+    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread",
   );
   await put(database(), "products", product.id, product);
   await put(database(), "categories", "phones", {
@@ -181,7 +194,60 @@ afterAll(async () => {
 });
 
 describe("price privacy and authorization", () => {
+  it("keeps role capabilities aligned with operational responsibilities", () => {
+    expect(hasCapability("Catalog Manager", "catalog.write")).toBe(true);
+    expect(hasCapability("Catalog Manager", "vendors.write")).toBe(false);
+    expect(hasCapability("Procurement Manager", "vendors.write")).toBe(true);
+    expect(hasCapability("Support", "support.write")).toBe(true);
+    expect(hasCapability("Support", "refunds.issue")).toBe(false);
+    expect(hasCapability("Super Admin", "team.manage")).toBe(true);
+  });
+  it("uses department state for discovery and purchase visibility", () => {
+    const visibleCategory = { active: true, restricted: false };
+    const archivedCategory = { active: false, restricted: false };
+    expect(isCustomerVisibleCategory(visibleCategory)).toBe(true);
+    expect(isCustomerVisibleCategory(archivedCategory)).toBe(false);
+    expect(isCustomerVisibleProduct(product, visibleCategory)).toBe(true);
+    expect(isCustomerVisibleProduct(product, archivedCategory)).toBe(false);
+    expect(
+      isPurchasableVariant(product, visibleCategory, product.variants[0]),
+    ).toBe(true);
+    expect(
+      isPurchasableVariant(product, visibleCategory, {
+        availability: "out_of_stock",
+      }),
+    ).toBe(false);
+  });
+  it("enforces SKU uniqueness for product and variant records in PostgreSQL", async () => {
+    await expect(
+      put(database(), "products", "p2", {
+        ...product,
+        id: "p2",
+        slug: "another-phone",
+        sku: "ANOTHER-PHONE",
+        variants: [
+          {
+            ...product.variants[0],
+            id: "v2",
+            sku: product.variants[0].sku.toLowerCase(),
+          },
+        ],
+      }),
+    ).rejects.toBeTruthy();
+  });
   it("excludes all prices and internal supplier data from public snapshots", async () => {
+    await put(database(), "settings", "store", {
+      storeName: "Paydan",
+      supportEmail: "support@example.com",
+      supportPhone: "+234 800 000 0000",
+      businessHours: "Weekdays",
+      currency: "NGN",
+      announcement: "Welcome",
+      paystackStatus: "not_connected",
+      transferEnabled: false,
+      orderNotificationEmail: "orders-internal@example.com",
+      supportNotificationEmail: "support-internal@example.com",
+    });
     await put(
       database(),
       "orders",
@@ -197,10 +263,85 @@ describe("price privacy and authorization", () => {
       '"costPrice"',
       "supplier-secret",
       "secret-order",
+      "orders-internal@example.com",
+      "support-internal@example.com",
     ])
       expect(wire).not.toContain(field);
     expect(result.orders).toEqual([]);
     expect(result.customers).toEqual([]);
+  });
+  it("paginates the public catalogue without exposing prices", async () => {
+    const response = await listProducts(
+      new Request("http://localhost:3000/api/products?limit=1"),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      products: Array<Record<string, unknown>>;
+      total: number;
+      nextCursor: string | null;
+    };
+    expect(body.total).toBe(1);
+    expect(body.products).toHaveLength(1);
+    expect(body.products[0]).not.toHaveProperty("price");
+    expect(body.products[0]).not.toHaveProperty("costPrice");
+    expect(body.nextCursor).toBeNull();
+  });
+  it("loads a public product detail independently without leaking price", async () => {
+    const response = await productDetail(
+      new Request("http://localhost:3000/api/products/phone"),
+      { params: Promise.resolve({ slug: "phone" }) },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      product: Record<string, unknown>;
+    };
+    expect(body.product).toMatchObject({ id: "p1", slug: "phone" });
+    expect(body.product).not.toHaveProperty("price");
+    expect(body.product).not.toHaveProperty("vendorId");
+  });
+  it("removes archived departments from paginated discovery", async () => {
+    await put(database(), "categories", "phones", {
+      slug: "phones",
+      name: "Phones",
+      title: "Phones",
+      description: "Devices",
+      image: "/favicon.svg",
+      order: 0,
+      active: false,
+      restricted: false,
+      subcategories: [],
+      facets: [],
+    });
+    const response = await listProducts(
+      new Request("http://localhost:3000/api/products"),
+    );
+    const body = (await response.json()) as {
+      products: unknown[];
+      total: number;
+    };
+    expect(body.products).toEqual([]);
+    expect(body.total).toBe(0);
+  });
+  it("keeps test-buyer notifications out of the production notification queue", async () => {
+    const testBuyer = {
+      id: "test-buyer",
+      name: "Test Buyer",
+      email: "buyer@paydan.local",
+    };
+    await enqueueViewerNotification(database(), testBuyer, {
+      eventKey: "test:event:one",
+      type: "test.event",
+      title: "Sample update",
+      body: "This is demonstration data.",
+      href: "/dashboard",
+    });
+    const scoped = await testNotificationsFor(database(), testBuyer.id);
+    const production = await database().query(
+      "SELECT count(*)::int AS count FROM notification",
+    );
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0].title).toContain("[Demonstration]");
+    expect(production.rows[0].count).toBe(0);
   });
   it("gives members prices without costs or other customer records", async () => {
     await put(
@@ -543,12 +684,18 @@ describe("authentication and assistant", () => {
     const id = crypto.randomUUID();
     await database().query(
       "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'add_to_cart',$3,now()+interval '15 minutes')",
-      [id, alice.id, JSON.stringify({ productId: "p1", variantId: "v1", quantity: 2 })],
+      [
+        id,
+        alice.id,
+        JSON.stringify({ productId: "p1", variantId: "v1", quantity: 2 }),
+      ],
     );
     await confirmAssistantProposal(alice, { proposalId: id });
     await confirmAssistantProposal(alice, { proposalId: id });
     expect((await snapshot(alice)).cart[0].quantity).toBe(2);
-    await expect(confirmAssistantProposal(bob, { proposalId: id })).rejects.toMatchObject({ status: 404 });
+    await expect(
+      confirmAssistantProposal(bob, { proposalId: id }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
 
@@ -569,7 +716,10 @@ describe("delivery infrastructure", () => {
     };
     expect(await enqueueMail(database(), input)).toBe(true);
     expect(await enqueueMail(database(), input)).toBe(false);
-    const result = await database().query("SELECT count(*)::int AS count FROM mail_outbox WHERE event_key=$1", [input.eventKey]);
+    const result = await database().query(
+      "SELECT count(*)::int AS count FROM mail_outbox WHERE event_key=$1",
+      [input.eventKey],
+    );
     expect(result.rows[0].count).toBe(1);
   });
 });
@@ -815,7 +965,10 @@ describe("sourcing, returns, media and stock recovery", () => {
       paymentMethod: "paystack",
       items: [
         {
+          lineId: "return-line-1",
           productId: "p1",
+          variantId: "v1",
+          sku: "PHONE-1",
           name: "Phone",
           variantLabel: "Black",
           image: "/favicon.svg",
@@ -844,7 +997,7 @@ describe("sourcing, returns, media and stock recovery", () => {
         [
           {
             orderId: order.id,
-            productId: "p1",
+            lineId: "return-line-1",
             quantity: 1,
             reason: "Damaged",
             detail: "Broken",
@@ -859,7 +1012,7 @@ describe("sourcing, returns, media and stock recovery", () => {
       [
         {
           orderId: order.id,
-          productId: "p1",
+          lineId: "return-line-1",
           quantity: 1,
           reason: "Damaged",
           detail: "Broken",

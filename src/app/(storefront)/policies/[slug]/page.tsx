@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { policyBySlug, policyPages } from "@/data/content";
+import {
+  POLICY_CONTENT_VERSION,
+  policyBySlug,
+  policyPages,
+} from "@/data/content";
 
 export function generateStaticParams() {
   return policyPages.map((page) => ({ slug: page.slug }));
@@ -39,7 +43,8 @@ export default async function PolicyPage({
         <p>{policy.summary}</p>
         <p className="policy-status">
           <span className="policy-draft">{policy.status}</span> · Updated{" "}
-          {policy.updated}
+          {policy.updated} · Version {POLICY_CONTENT_VERSION}
+          {policy.approvedAt ? ` · Approved ${policy.approvedAt}` : ""}
         </p>
       </header>
 

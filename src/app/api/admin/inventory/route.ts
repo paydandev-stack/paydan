@@ -6,16 +6,13 @@ import {
   failure,
   HttpError,
   json,
-  requireRole,
+  requireCapability,
   sameOrigin,
   viewer,
 } from "@/server/http";
 export async function GET(request: Request) {
   try {
-    requireRole(await viewer(request.headers), [
-      "Catalog Manager",
-      "Order Manager",
-    ]);
+    requireCapability(await viewer(request.headers), "inventory.read");
     return json((await database().query("SELECT * FROM inventory")).rows);
   } catch (error) {
     return failure(error);
@@ -24,7 +21,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     sameOrigin(request);
-    requireRole(await viewer(request.headers), ["Catalog Manager"]);
+    const user = await viewer(request.headers);
+    requireCapability(user, "inventory.write");
     const value = z
       .object({
         productId: z.string().max(150),
@@ -40,6 +38,15 @@ export async function POST(request: Request) {
         "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
         [value.productId, value.variantId, value.available],
       );
+      const { writeAudit } = await import("@/server/audit");
+      await writeAudit(db, {
+        actor: user!.email,
+        action: "inventory.adjust",
+        record: `${value.productId}:${value.variantId}`,
+        capability: "inventory.write",
+        source: "admin",
+        after: { available: value.available },
+      });
     });
     return json({ saved: true });
   } catch (error) {

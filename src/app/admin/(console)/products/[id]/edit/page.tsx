@@ -20,11 +20,13 @@ type VariantRow = {
   price: string;
   availability: Availability;
   sku: string;
+  options: string;
 };
 type ProductForm = {
   name: string;
   sku: string;
   categorySlug: string;
+  subcategorySlug: string;
   brand: string;
   description: string;
   price: string;
@@ -37,6 +39,7 @@ type ProductForm = {
   newArrival: boolean;
   restricted: boolean;
   highlights: string;
+  specifications: string;
   variants: VariantRow[];
 };
 function rowKey(): string {
@@ -48,6 +51,24 @@ function parseAmount(value: string): number | null {
   const amount = Number(trimmed);
   return Number.isFinite(amount) ? amount : null;
 }
+function parsePairs(value: string) {
+  return Object.fromEntries(
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [key, ...rest] = line.split(":");
+        return [key.trim(), rest.join(":").trim()];
+      })
+      .filter(([key, value]) => key && value),
+  );
+}
+function formatPairs(value: Record<string, string>) {
+  return Object.entries(value)
+    .map(([key, item]) => `${key}: ${item}`)
+    .join("\n");
+}
 function toForm(
   product: Product,
   vendors: {
@@ -58,6 +79,7 @@ function toForm(
     name: product.name,
     sku: product.sku,
     categorySlug: product.categorySlug,
+    subcategorySlug: product.subcategorySlug ?? "",
     brand: product.brand,
     description: product.description,
     price: String(product.price),
@@ -72,12 +94,14 @@ function toForm(
     newArrival: product.newArrival,
     restricted: product.restricted,
     highlights: product.highlights.join("\n"),
+    specifications: formatPairs(product.specifications),
     variants: product.variants.map((variant) => ({
       key: rowKey(),
       label: variant.label,
       price: String(variant.price),
       availability: variant.availability,
       sku: variant.sku,
+      options: formatPairs(variant.options),
     })),
   };
 }
@@ -86,6 +110,7 @@ function blankForm(categorySlug: string, vendorId: string): ProductForm {
     name: "",
     sku: "",
     categorySlug,
+    subcategorySlug: "",
     brand: "",
     description: "",
     price: "",
@@ -98,6 +123,7 @@ function blankForm(categorySlug: string, vendorId: string): ProductForm {
     newArrival: false,
     restricted: false,
     highlights: "",
+    specifications: "",
     variants: [],
   };
 }
@@ -176,6 +202,9 @@ export default function AdminEditProductPage() {
       : blankForm(state.categories[0]?.slug ?? "", ""),
   );
   const [images, setImages] = useState<string[]>(() => product?.images ?? []);
+  const [imageAlts, setImageAlts] = useState<Record<string, string>>(
+    () => product?.imageAlts ?? {},
+  );
   const [confirmArchive, setConfirmArchive] = useState(false);
   if (!product) notFound();
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
@@ -247,7 +276,7 @@ export default function AdminEditProductPage() {
             id: product.variants[index]?.id ?? `${product.id}-v${index + 1}`,
             sku: row.sku.trim() || `${sku}-${index + 1}`,
             label: row.label.trim(),
-            options: product.variants[index]?.options ?? {},
+            options: parsePairs(row.options),
             price: parseAmount(row.price) as number,
             availability: row.availability,
           }))
@@ -264,16 +293,19 @@ export default function AdminEditProductPage() {
       const updated: Product = {
         ...product,
         images,
+        imageAlts,
         slug: product.slug,
         sku,
         name,
         categorySlug: form.categorySlug,
+        subcategorySlug: form.subcategorySlug || undefined,
         brand,
         description: form.description.trim(),
         highlights: form.highlights
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
+        specifications: parsePairs(form.specifications),
         price,
         compareAt:
           compareAt !== null && compareAt > price ? compareAt : undefined,
@@ -321,9 +353,58 @@ export default function AdminEditProductPage() {
           onUploaded={(url) => setImages((current) => [...current, url])}
         />
         <div>
-          {images.map((url) => (
+          {images.map((url, index) => (
             <div key={url}>
-              <img src={url} alt="Product image" width={70} height={70} />
+              <img
+                src={url}
+                alt={imageAlts[url] || "Product image"}
+                width={70}
+                height={70}
+              />
+              <label>
+                Alt text
+                <input
+                  value={imageAlts[url] ?? ""}
+                  onChange={(event) =>
+                    setImageAlts((current) => ({
+                      ...current,
+                      [url]: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                disabled={index === 0}
+                onClick={() =>
+                  setImages((current) => {
+                    const next = [...current];
+                    [next[index - 1], next[index]] = [
+                      next[index],
+                      next[index - 1],
+                    ];
+                    return next;
+                  })
+                }
+              >
+                Move up
+              </button>
+              <button
+                type="button"
+                disabled={index === images.length - 1}
+                onClick={() =>
+                  setImages((current) => {
+                    const next = [...current];
+                    [next[index], next[index + 1]] = [
+                      next[index + 1],
+                      next[index],
+                    ];
+                    return next;
+                  })
+                }
+              >
+                Move down
+              </button>
               <button
                 type="button"
                 onClick={() =>
@@ -332,6 +413,7 @@ export default function AdminEditProductPage() {
               >
                 Remove image
               </button>
+              {index === 0 ? <small>Primary image</small> : null}
             </div>
           ))}
         </div>
@@ -359,11 +441,28 @@ export default function AdminEditProductPage() {
               <SelectField
                 label="Category"
                 value={form.categorySlug}
-                onChange={(value) => set("categorySlug", value)}
+                onChange={(value) => {
+                  set("categorySlug", value);
+                  set("subcategorySlug", "");
+                }}
                 options={state.categories.map((item) => ({
                   value: item.slug,
                   label: item.name,
                 }))}
+              />
+              <SelectField
+                label="Subcategory"
+                value={form.subcategorySlug}
+                onChange={(value) => set("subcategorySlug", value)}
+                options={[
+                  { value: "", label: "No subcategory" },
+                  ...(state.categories
+                    .find((item) => item.slug === form.categorySlug)
+                    ?.subcategories.map((item) => ({
+                      value: item.slug,
+                      label: item.name,
+                    })) ?? []),
+                ]}
               />
               <SelectField
                 label="Supplying vendor"
@@ -434,6 +533,14 @@ export default function AdminEditProductPage() {
                 value={form.description}
                 onChange={(event) => set("description", event.target.value)}
               />
+              <AdminTextArea
+                wide
+                label="Specifications"
+                rows={5}
+                value={form.specifications}
+                onChange={(event) => set("specifications", event.target.value)}
+                hint="One per line as Label: Value."
+              />
             </div>
           </section>
 
@@ -481,7 +588,7 @@ export default function AdminEditProductPage() {
                 key={row.key}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.4fr .8fr 1fr 1fr auto",
+                  gridTemplateColumns: "1.2fr .8fr 1fr 1fr 1.4fr auto",
                   gap: ".6rem",
                   alignItems: "end",
                   marginBottom: ".6rem",
@@ -527,6 +634,23 @@ export default function AdminEditProductPage() {
                     setRow(row.key, { sku: event.target.value })
                   }
                 />
+                <AdminTextField
+                  label="Options"
+                  value={row.options}
+                  placeholder="Colour: Black"
+                  hint={
+                    state.categories.find(
+                      (item) => item.slug === form.categorySlug,
+                    )?.facets.length
+                      ? `Facets: ${state.categories
+                          .find((item) => item.slug === form.categorySlug)!
+                          .facets.join(", ")}`
+                      : "One per line as Label: Value"
+                  }
+                  onChange={(event) =>
+                    setRow(row.key, { options: event.target.value })
+                  }
+                />
                 <button
                   type="button"
                   className="admin-btn quiet"
@@ -558,6 +682,7 @@ export default function AdminEditProductPage() {
                       price: "",
                       availability: "in_stock",
                       sku: "",
+                      options: "",
                     },
                   ],
                 }))

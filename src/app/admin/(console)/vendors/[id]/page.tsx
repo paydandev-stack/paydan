@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/status-pill";
 import { formatDate, money, plural } from "@/lib/format";
 import { productStatusMeta, vendorStatusMeta } from "@/lib/status";
 import type { Vendor, VendorStatus } from "@/lib/types";
+import { hasCapability } from "@/lib/capabilities";
 type VendorForm = {
   name: string;
   contactName: string;
@@ -135,6 +136,7 @@ export default function AdminVendorDetailPage() {
     id: string;
   }>();
   const { state, actions } = useDemo();
+  const canWrite = hasCapability(state.adminSession?.role, "vendors.write");
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const vendor = state.vendors.find((item) => item.id === idParam);
   const [form, setForm] = useState<VendorForm>(() =>
@@ -318,9 +320,11 @@ export default function AdminVendorDetailPage() {
             <button type="button" onClick={resetForm}>
               Discard changes
             </button>
-            <button type="submit" className="primary">
-              Save profile
-            </button>
+            {canWrite ? (
+              <button type="submit" className="primary">
+                Save profile
+              </button>
+            ) : null}
           </div>
         </form>
 
@@ -361,21 +365,23 @@ export default function AdminVendorDetailPage() {
             <StatusPill tone={vendorStatusMeta[vendor.status].tone}>
               {vendorStatusMeta[vendor.status].label}
             </StatusPill>
-            <button
-              type="button"
-              className="admin-btn ghost"
-              style={{ width: "100%" }}
-              onClick={async () => {
-                try {
-                  return await actions.saveVendor({
-                    ...vendor,
-                    status: vendor.status === "active" ? "on_hold" : "active",
-                  });
-                } catch (error) {}
-              }}
-            >
-              {vendor.status === "active" ? "Put on hold" : "Reactivate"}
-            </button>
+            {canWrite ? (
+              <button
+                type="button"
+                className="admin-btn ghost"
+                style={{ width: "100%" }}
+                onClick={async () => {
+                  try {
+                    return await actions.saveVendor({
+                      ...vendor,
+                      status: vendor.status === "active" ? "on_hold" : "active",
+                    });
+                  } catch (error) {}
+                }}
+              >
+                {vendor.status === "active" ? "Put on hold" : "Reactivate"}
+              </button>
+            ) : null}
           </div>
 
           <h3 style={{ marginTop: "1.5rem" }}>Supplied products</h3>

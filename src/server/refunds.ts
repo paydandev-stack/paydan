@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Order, ReturnRequest } from "@/lib/types";
 import { database, put, record, transaction } from "./db";
-import { HttpError, requireRole, type Viewer } from "./http";
+import { HttpError, requireCapability, type Viewer } from "./http";
 import { kobo } from "./schemas";
 import { paystack } from "./payments";
 import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
+import { findOrderLine } from "@/lib/order-lines";
+import { writeAudit } from "./audit";
+import { enqueueNotification } from "./notifications";
 export async function refundReturn(user: Viewer, returnId: string) {
-  requireRole(user, ["Order Manager"]);
+  requireCapability(user, "refunds.issue");
   const prepared = await transaction(async (db) => {
     const request = await record<ReturnRequest>(db, "returns", returnId, true);
     if (!request || request.status !== "approved")
@@ -21,7 +24,12 @@ export async function refundReturn(user: Viewer, returnId: string) {
       returnId,
     ]);
     if (prior.rows.length) return { existing: true, ...prior.rows[0] };
-    const item = order.items.find((i) => i.productId === request.productId);
+    if (!request.lineId)
+      throw new HttpError(
+        409,
+        "This legacy return needs an exact order line selected before refunding.",
+      );
+    const item = findOrderLine(order, request.lineId);
     if (!item) throw new HttpError(400, "Order item not found.");
     const amount = Math.floor(
       (kobo(item.unitPrice) *
@@ -43,12 +51,12 @@ export async function refundReturn(user: Viewer, returnId: string) {
       "INSERT INTO refund(id,order_id,return_id,amount_kobo,status) VALUES($1,$2,$3,$4,'submitting')",
       [id, order.id, returnId, amount],
     );
-    await put(db, "audit", randomUUID(), {
-      id: randomUUID(),
+    await writeAudit(db, {
       actor: user.email,
       action: "Requested refund",
       record: returnId,
-      at: new Date().toISOString(),
+      capability: "refunds.issue",
+      source: "admin",
     });
     return {
       id,
@@ -143,6 +151,14 @@ export async function verifyRefund(providerId: string) {
       title: "Refund processed",
       message: `Paystack confirmed the refund for order ${order.reference}.`,
       href: "/admin/returns",
+    });
+    await enqueueNotification(db, {
+      ownerId: order.customerId,
+      eventKey: `refund:${refund.id}:processed`,
+      type: "refund.processed",
+      title: "Refund processed",
+      body: `The refund for ${order.reference} has been processed.`,
+      href: `/account/orders/${order.id}`,
     });
   });
 }

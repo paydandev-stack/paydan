@@ -15,81 +15,6 @@ import {
   SearchIcon,
 } from "@/components/icons";
 
-const homeDepartments = [
-  {
-    slug: "supermarket",
-    number: "01",
-    name: "Supermarket",
-    copy: "Everyday pantry essentials",
-  },
-  {
-    slug: "phones-and-tablets",
-    number: "02",
-    name: "Phones & Tablets",
-    copy: "Devices and accessories",
-  },
-  {
-    slug: "village-market",
-    number: "03",
-    name: "Village Market",
-    copy: "Locally sourced market staples",
-  },
-  {
-    slug: "health-and-beauty",
-    number: "04",
-    name: "Health & Beauty",
-    copy: "Care for every routine",
-  },
-  {
-    slug: "fashion",
-    number: "05",
-    name: "Fashion",
-    copy: "Fresh everyday style",
-  },
-  {
-    slug: "food-and-eatery",
-    number: "06",
-    name: "Food & Eatery",
-    copy: "Meals worth sharing",
-  },
-  {
-    slug: "adult-toys",
-    number: "07",
-    name: "Adult Toys",
-    copy: "Private, age-restricted shopping",
-    adult: true,
-  },
-  {
-    slug: "gaming",
-    number: "08",
-    name: "Gaming",
-    copy: "Consoles and accessories",
-  },
-  {
-    slug: "appliances",
-    number: "09",
-    name: "Appliances",
-    copy: "Make home life easier",
-  },
-  {
-    slug: "fuel-and-energy",
-    number: "10",
-    name: "Fuel & Energy",
-    copy: "Energy products and accessories",
-  },
-  {
-    slug: "shoes-and-bags",
-    number: "11",
-    name: "Shoes & Bags",
-    copy: "Finish every look",
-  },
-  {
-    slug: "automotive-and-fuel",
-    number: "12",
-    name: "Automotive",
-    copy: "Tools and accessories",
-  },
-];
 const steps = [
   ["01", "Explore", "Browse products across trusted categories."],
   ["02", "Place your order", "Checkout once through the Paydan storefront."],
@@ -108,6 +33,9 @@ export default function HomePage() {
   const hero = state.banners.find(
     (banner) => banner.active && banner.placement === "hero",
   );
+  const sideBanners = state.banners
+    .filter((banner) => banner.active && banner.placement === "side")
+    .slice(0, 2);
   const signedIn = Boolean(state.customerSession);
 
   /**
@@ -117,18 +45,31 @@ export default function HomePage() {
   const catalogue = toPublicProducts(products);
 
   const techPicks = catalogue
-    .filter((product) =>
-      ["phones-and-tablets", "gaming", "appliances"].includes(
-        product.categorySlug,
-      ),
+    .filter(
+      (product) =>
+        product.featured &&
+        ["phones-and-tablets", "gaming", "appliances"].includes(
+          product.categorySlug,
+        ),
     )
     .slice(0, 4);
-  const favourites = [...catalogue].reverse().slice(0, 5);
-  const newArrivals = catalogue.slice(2, 7);
-  const trending = catalogue.slice(0, 8);
-  const departmentCount = state.categories.filter(
-    (category) => !category.restricted,
-  ).length;
+  const favourites = catalogue
+    .filter((product) => product.featured)
+    .slice(0, 5);
+  const newArrivals = catalogue
+    .filter((product) => product.newArrival)
+    .slice(0, 5);
+  const trending = catalogue
+    .filter((product) => product.featured || product.newArrival)
+    .slice(0, 8);
+  const homeDepartments = [...state.categories]
+    .filter((category) => category.homepageVisible !== false)
+    .sort(
+      (left, right) =>
+        (left.homepageOrder ?? left.order) -
+        (right.homepageOrder ?? right.order),
+    );
+  const departmentCount = state.categories.length;
   const bestSaving = products.reduce((best, product) => {
     const off = percentOff(product.price, product.compareAt) ?? 0;
     return off > best ? off : best;
@@ -142,7 +83,7 @@ export default function HomePage() {
             {hero ? (
               <Image
                 src={hero.image}
-                alt=""
+                alt={hero.altText ?? ""}
                 fill
                 priority
                 sizes="(max-width: 900px) 100vw, 68vw"
@@ -160,7 +101,7 @@ export default function HomePage() {
                 {hero?.subtitle ??
                   "Shop everyday essentials, standout technology and fresh finds — all through one trusted storefront."}
               </p>
-              <Link className="primary-button" href="/shop">
+              <Link className="primary-button" href={hero?.href ?? "/shop"}>
                 {hero?.ctaLabel ?? "Explore the collection"}
                 <ArrowRightIcon />
               </Link>
@@ -168,27 +109,50 @@ export default function HomePage() {
           </div>
 
           <div className="hero-side">
-            <article className="promo promo-tech">
-              <span>TECH REFRESH</span>
-              <h2>Better tools for everyday life.</h2>
-              <Link href="/category/phones-and-tablets">
-                Shop technology
-                <ArrowRightIcon />
-              </Link>
-            </article>
-            <article className="promo promo-source">
-              <span>PAYDAN SOURCING</span>
-              <h2>Can&rsquo;t find it? We&rsquo;ll help source it.</h2>
-              <Link href="/request-product">
-                Make a request
-                <ArrowRightIcon />
-              </Link>
-            </article>
+            {sideBanners.length
+              ? sideBanners.map((banner, index) => (
+                  <article
+                    className={`promo ${index ? "promo-source" : "promo-tech"}`}
+                    key={banner.id}
+                    style={
+                      banner.image
+                        ? {
+                            backgroundImage: `linear-gradient(145deg, rgba(233,241,235,.92), rgba(200,222,208,.78)), url(${banner.image})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                          }
+                        : undefined
+                    }
+                  >
+                    <span>{banner.eyebrow}</span>
+                    <h2>{banner.title}</h2>
+                    <Link href={banner.href}>
+                      {banner.ctaLabel}
+                      <ArrowRightIcon />
+                    </Link>
+                  </article>
+                ))
+              : [
+                  <article className="promo promo-tech" key="technology">
+                    <span>TECH REFRESH</span>
+                    <h2>Better tools for everyday life.</h2>
+                    <Link href="/category/phones-and-tablets">
+                      Shop technology
+                      <ArrowRightIcon />
+                    </Link>
+                  </article>,
+                  <article className="promo promo-source" key="sourcing">
+                    <span>PAYDAN SOURCING</span>
+                    <h2>Can&rsquo;t find it? We&rsquo;ll help source it.</h2>
+                    <Link href="/request-product">
+                      Make a request
+                      <ArrowRightIcon />
+                    </Link>
+                  </article>,
+                ]}
           </div>
         </section>
-
       </div>
-
 
       <section className="section department-section">
         <div className="wrap">
@@ -204,17 +168,16 @@ export default function HomePage() {
           </div>
 
           <div className="category-grid">
-            {homeDepartments.map((department) => (
+            {homeDepartments.map((department, index) => (
               <Link
-                className={`category-card${department.adult ? " restricted" : ""}`}
+                className="category-card"
                 key={department.slug}
                 href={`/category/${department.slug}`}
               >
-                <span>{department.number}</span>
+                <span>{String(index + 1).padStart(2, "0")}</span>
                 <div>
                   <h3>{department.name}</h3>
-                  <p>{department.copy}</p>
-                  {department.adult ? <small>18+ restricted</small> : null}
+                  <p>{department.shortDescription || department.description}</p>
                 </div>
                 <ChevronRightIcon />
               </Link>

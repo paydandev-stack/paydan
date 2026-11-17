@@ -17,7 +17,7 @@ import { put, record, transaction } from "./db";
 
 type Identity = { id: string; name: string; email: string };
 
-const TEST_DATA_VERSION = 1;
+const TEST_DATA_VERSION = 2;
 const TEST_KINDS = [
   "testProducts",
   "testVendors",
@@ -25,6 +25,7 @@ const TEST_KINDS = [
   "testSourcing",
   "testReturns",
   "testShippingZones",
+  "testNotifications",
 ] as const;
 
 export function testBuyerEmail() {
@@ -45,6 +46,24 @@ export function productRecordKind(user: Pick<Identity, "email">) {
   return isTestBuyer(user) ? "testProducts" : "products";
 }
 
+export type ViewerDataScope = "production" | `test:${string}`;
+
+export function viewerDataScope(user: Pick<Identity, "id" | "email">) {
+  return (
+    isTestBuyer(user) ? `test:${user.id}` : "production"
+  ) as ViewerDataScope;
+}
+
+export function scopedRecordKind(
+  user: Pick<Identity, "email">,
+  productionKind: "orders" | "returns" | "sourcing",
+) {
+  if (!isTestBuyer(user)) return productionKind;
+  if (productionKind === "orders") return "testOrders";
+  if (productionKind === "returns") return "testReturns";
+  return "testSourcing";
+}
+
 function testOrders(user: Identity): Order[] {
   return [0, 1, 4, 5].map((sourceIndex, index) => {
     const source = structuredClone(seedOrders[sourceIndex]);
@@ -61,6 +80,12 @@ function testOrders(user: Identity): Order[] {
         id: `${id}-address`,
         recipient: user.name,
       },
+      items: source.items.map((item, itemIndex) => ({
+        ...item,
+        lineId: `line-${id}-${itemIndex + 1}`,
+        variantId: item.variantId ?? `test-variant-${item.productId}`,
+        sku: item.sku ?? `TEST-${item.productId}-${itemIndex + 1}`,
+      })),
       vendorGroups: source.vendorGroups.map((group, groupIndex) => ({
         ...group,
         id: `${id}-supplier-${groupIndex + 1}`,
@@ -93,6 +118,10 @@ function testReturns(user: Identity, orders: Order[]): ReturnRequest[] {
       orderId: order.id,
       customerId: user.id,
       productId: item.productId,
+      lineId: item.lineId,
+      variantId: item.variantId,
+      variantLabel: item.variantLabel,
+      sku: item.sku,
       productName: item.name,
       status: "under_review",
       adminNote: "",
@@ -121,7 +150,7 @@ export async function ensureTestBuyerData(user: Identity) {
     await db.query(
       `DELETE FROM commerce_record
        WHERE owner_id=$1
-       AND kind IN ('testProducts','testVendors','testOrders','testSourcing','testReturns','testShippingZones')`,
+       AND kind IN ('testProducts','testVendors','testOrders','testSourcing','testReturns','testShippingZones','testNotifications')`,
       [user.id],
     );
 
@@ -139,6 +168,32 @@ export async function ensureTestBuyerData(user: Identity) {
       await put(db, "testSourcing", request.id, request, user.id);
     for (const request of testReturns(user, orders))
       await put(db, "testReturns", request.id, request, user.id);
+    const notificationNow = new Date().toISOString();
+    for (const notification of [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        type: "order.status",
+        title: "[Demonstration] An order is on the way",
+        body: "TEST-PD-0001 has a new fulfilment update.",
+        href: "/account/orders/test-order-1",
+        createdAt: notificationNow,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000002",
+        type: "sourcing.quote",
+        title: "[Demonstration] A sourcing quote is ready",
+        body: "Review the sample quote and buyer response flow.",
+        href: "/account/sourcing-requests/test-sourcing-1",
+        createdAt: notificationNow,
+      },
+    ])
+      await put(
+        db,
+        "testNotifications",
+        notification.id,
+        notification,
+        user.id,
+      );
 
     const existing = await record<Partial<DemoState>>(db, "accounts", user.id);
     const available = products.filter(
@@ -181,13 +236,12 @@ export async function ensureTestBuyerData(user: Identity) {
                   quantity: 1,
                 },
               ],
-        addresses:
-          existing?.addresses?.length
-            ? existing.addresses
-            : seedAddresses.map((address) => ({
-                ...address,
-                recipient: user.name,
-              })),
+        addresses: existing?.addresses?.length
+          ? existing.addresses
+          : seedAddresses.map((address) => ({
+              ...address,
+              recipient: user.name,
+            })),
         location: existing?.location ?? { state: "Lagos", city: "Ikeja" },
         lastOrderId: existing?.lastOrderId,
         lastSourcingReference: existing?.lastSourcingReference,

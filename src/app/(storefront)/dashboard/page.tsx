@@ -48,6 +48,56 @@ export default function Dashboard() {
         (product) => product.categorySlug === activeDepartment.slug,
       )
     : products.slice(0, 12);
+  const needsAttention = [
+    ...state.orders
+      .filter(
+        (order) =>
+          order.paymentStatus === "pending" ||
+          ["awaiting_payment", "sourcing"].includes(order.fulfillmentStatus),
+      )
+      .map((order) => ({
+        id: `order-${order.id}`,
+        title: `Order ${order.reference}`,
+        body:
+          order.paymentStatus === "pending"
+            ? "Payment still needs attention."
+            : "Your order is being sourced.",
+        href: `/account/orders/${order.id}`,
+      })),
+    ...state.sourcing
+      .filter((request) => request.status === "awaiting_customer")
+      .map((request) => ({
+        id: `sourcing-${request.id}`,
+        title: `Quote ${request.reference}`,
+        body: "A sourcing quote is waiting for your response.",
+        href: `/account/sourcing-requests/${request.id}`,
+      })),
+    ...state.returns
+      .filter((request) =>
+        ["approved", "under_review"].includes(request.status),
+      )
+      .map((request) => ({
+        id: `return-${request.id}`,
+        title: `Return ${request.reference}`,
+        body: `Status: ${request.status.replaceAll("_", " ")}.`,
+        href: "/account/returns",
+      })),
+  ].slice(0, 4);
+  const recentlyViewed = state.recentlyViewed
+    .map((id) => products.find((product) => product.id === id))
+    .filter((product): product is (typeof products)[number] => Boolean(product))
+    .slice(0, 5);
+  const boughtIds = [
+    ...new Set(
+      state.orders
+        .filter((order) => order.fulfillmentStatus === "delivered")
+        .flatMap((order) => order.items.map((item) => item.productId)),
+    ),
+  ];
+  const buyAgain = boughtIds
+    .map((id) => products.find((product) => product.id === id))
+    .filter((product): product is (typeof products)[number] => Boolean(product))
+    .slice(0, 5);
   function chooseDepartment(slug: string | null) {
     setSelectedDepartment(slug);
     setDepartmentMenuOpen(false);
@@ -109,6 +159,18 @@ export default function Dashboard() {
         </div>
         <Link href="/account/profile">Manage your account →</Link>
       </header>
+      {state.dataScope === "test" ? (
+        <section className="admin-note" role="status">
+          <strong>Demonstration data</strong>
+          <p>
+            This private fixture never enters real orders, support queues,
+            payments or operational reports.
+          </p>
+          <button type="button" onClick={actions.resetDemo}>
+            Restore test data
+          </button>
+        </section>
+      ) : null}
       {intent && (
         <section className="resume-card">
           <div>
@@ -147,26 +209,128 @@ export default function Dashboard() {
           your cart
         </Link>
       </nav>
+      {needsAttention.length ? (
+        <section
+          className="dashboard-attention"
+          aria-labelledby="attention-heading"
+        >
+          <div className="section-heading">
+            <div>
+              <span className="kicker green">NEEDS ATTENTION</span>
+              <h2 id="attention-heading">Your next steps</h2>
+            </div>
+          </div>
+          <div className="dashboard-shortcuts">
+            {needsAttention.map((item) => (
+              <Link href={item.href} key={item.id}>
+                <strong>{item.title}</strong>
+                {item.body}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {recentlyViewed.length ? (
+        <section className="section dashboard-personal-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker green">CONTINUE SHOPPING</span>
+              <h2>Recently viewed</h2>
+            </div>
+          </div>
+          <div className="product-grid">
+            {recentlyViewed.map((product) => (
+              <ProductCard key={product.id} product={product} showPrice />
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {buyAgain.length ? (
+        <section className="section dashboard-personal-section">
+          <div className="section-heading">
+            <div>
+              <span className="kicker green">FROM DELIVERED ORDERS</span>
+              <h2>Buy again</h2>
+            </div>
+          </div>
+          <div className="product-grid">
+            {buyAgain.map((product) => (
+              <ProductCard key={product.id} product={product} showPrice />
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="dashboard-shop" aria-labelledby="department-heading">
         <div className="dashboard-department-select">
           <span>Find your department</span>
-          <button type="button" onClick={() => setDepartmentMenuOpen(true)} aria-expanded={departmentMenuOpen}>
+          <button
+            type="button"
+            onClick={() => setDepartmentMenuOpen(true)}
+            aria-expanded={departmentMenuOpen}
+          >
             {activeDepartment?.name ?? "For you"} <b aria-hidden="true">⌄</b>
           </button>
         </div>
-        <div className={departmentMenuOpen ? "dashboard-department-sheet open" : "dashboard-department-sheet"} role="dialog" aria-modal="true" aria-label="Choose a department">
-          <header><strong>Choose a department</strong><button type="button" onClick={() => setDepartmentMenuOpen(false)} aria-label="Close departments">×</button></header>
+        <div
+          className={
+            departmentMenuOpen
+              ? "dashboard-department-sheet open"
+              : "dashboard-department-sheet"
+          }
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose a department"
+        >
+          <header>
+            <strong>Choose a department</strong>
+            <button
+              type="button"
+              onClick={() => setDepartmentMenuOpen(false)}
+              aria-label="Close departments"
+            >
+              ×
+            </button>
+          </header>
           <nav>
-            <button type="button" className={!activeDepartment ? "active" : undefined} onClick={() => chooseDepartment(null)}>For you <span>Personal picks</span></button>
+            <button
+              type="button"
+              className={!activeDepartment ? "active" : undefined}
+              onClick={() => chooseDepartment(null)}
+            >
+              For you <span>Personal picks</span>
+            </button>
             {departments.map((department) => (
-              <button type="button" key={department.slug} className={activeDepartment?.slug === department.slug ? "active" : undefined} onClick={() => chooseDepartment(department.slug)}>
+              <button
+                type="button"
+                key={department.slug}
+                className={
+                  activeDepartment?.slug === department.slug
+                    ? "active"
+                    : undefined
+                }
+                onClick={() => chooseDepartment(department.slug)}
+              >
                 {department.name}
-                <span>{products.filter((product) => product.categorySlug === department.slug).length} products</span>
+                <span>
+                  {
+                    products.filter(
+                      (product) => product.categorySlug === department.slug,
+                    ).length
+                  }{" "}
+                  products
+                </span>
               </button>
             ))}
           </nav>
         </div>
-        {departmentMenuOpen ? <button type="button" className="sheet-backdrop" aria-label="Close departments" onClick={() => setDepartmentMenuOpen(false)} /> : null}
+        {departmentMenuOpen ? (
+          <button
+            type="button"
+            className="sheet-backdrop"
+            aria-label="Close departments"
+            onClick={() => setDepartmentMenuOpen(false)}
+          />
+        ) : null}
 
         <div className="dashboard-shop-layout">
           <aside className="dashboard-department-sidebar">

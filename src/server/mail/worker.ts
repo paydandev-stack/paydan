@@ -3,8 +3,18 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { database } from "../db";
 import { mailTransport, messageDomain } from "./transport";
+import { enqueueOperationsAlert } from "./queue";
 
-type ClaimedMail = { id: string; recipient: string; subject: string; body: string; html: string | null; reply_to: string | null; attempts: number; claim_token: string };
+type ClaimedMail = {
+  id: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  html: string | null;
+  reply_to: string | null;
+  attempts: number;
+  claim_token: string;
+};
 
 async function claim(limit: number): Promise<ClaimedMail[]> {
   const token = randomUUID();
@@ -22,15 +32,48 @@ async function claim(limit: number): Promise<ClaimedMail[]> {
   return result.rows;
 }
 
+export async function retryDeadMail(limit = 25) {
+  const result = await database().query(
+    `WITH retryable AS (
+       SELECT m.id
+       FROM mail_outbox m
+       WHERE m.dead_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM email_suppression s
+           WHERE s.recipient=lower(m.recipient)
+         )
+       ORDER BY m.dead_at
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE mail_outbox m
+     SET dead_at=NULL, attempts=0, next_attempt=now(), last_error=NULL,
+         claimed_at=NULL, claim_token=NULL
+     FROM retryable
+     WHERE m.id=retryable.id
+     RETURNING m.id`,
+    [Math.max(1, Math.min(limit, 50))],
+  );
+  return result.rows.length;
+}
+
 export async function processMailBatch(limit = 25) {
   const mails = await claim(limit);
   if (!mails.length) return { claimed: 0, sent: 0, failed: 0, suppressed: 0 };
   const transport = mailTransport();
-  let sent = 0, failed = 0, suppressed = 0;
+  let sent = 0,
+    failed = 0,
+    suppressed = 0;
   for (const mail of mails) {
-    const blocked = await database().query("SELECT 1 FROM email_suppression WHERE recipient=$1", [mail.recipient.toLowerCase()]);
+    const blocked = await database().query(
+      "SELECT 1 FROM email_suppression WHERE recipient=$1",
+      [mail.recipient.toLowerCase()],
+    );
     if (blocked.rows.length) {
-      await database().query("UPDATE mail_outbox SET dead_at=now(),last_error='Recipient suppressed',claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2", [mail.id, mail.claim_token]);
+      await database().query(
+        "UPDATE mail_outbox SET dead_at=now(),last_error='Recipient suppressed',claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2",
+        [mail.id, mail.claim_token],
+      );
       suppressed++;
       continue;
     }
@@ -49,10 +92,24 @@ export async function processMailBatch(limit = 25) {
         info.response?.match(/\b([a-f0-9]{8}-[a-f0-9-]{27,})\b/i)?.[1] ||
         info.messageId ||
         null;
-      await database().query(`UPDATE mail_outbox SET sent_at=now(),last_error=NULL,body='',html=NULL,provider_message_id=$3,claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2`, [mail.id, mail.claim_token, providerMessageId]);
+      await database().query(
+        `UPDATE mail_outbox SET sent_at=now(),last_error=NULL,body='',html=NULL,provider_message_id=$3,claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2`,
+        [mail.id, mail.claim_token, providerMessageId],
+      );
       sent++;
     } catch {
-      await database().query(`UPDATE mail_outbox SET attempts=attempts+1,last_error='SMTP delivery failed',next_attempt=now()+(power(2,attempts+1)*interval '1 minute'),dead_at=CASE WHEN attempts+1 >= 8 THEN now() ELSE dead_at END,claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2`, [mail.id, mail.claim_token]);
+      await database().query(
+        `UPDATE mail_outbox SET attempts=attempts+1,last_error='SMTP delivery failed',next_attempt=now()+(power(2,attempts+1)*interval '1 minute'),dead_at=CASE WHEN attempts+1 >= 8 THEN now() ELSE dead_at END,claimed_at=NULL,claim_token=NULL WHERE id=$1 AND claim_token=$2`,
+        [mail.id, mail.claim_token],
+      );
+      if (mail.attempts + 1 >= 8)
+        await enqueueOperationsAlert(database(), {
+          eventKey: `mail:${mail.id}:dead`,
+          eventType: "mail.dead",
+          title: "Transactional email failed",
+          message: `Outbox message ${mail.id} exhausted its delivery attempts.`,
+          href: "/admin/operations",
+        });
       failed++;
     }
   }

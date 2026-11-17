@@ -11,6 +11,7 @@ import {
   procurementStageMeta,
 } from "@/lib/status";
 import { StatusPill } from "@/components/status-pill";
+import { normalizedOrderItems } from "@/lib/order-lines";
 export default function AccountOrderPage() {
   const params = useParams<{
     id: string;
@@ -23,6 +24,7 @@ export default function AccountOrderPage() {
   const returns = state.returns.filter(
     (request) => request.orderId === order.id,
   );
+  const orderItems = normalizedOrderItems(order);
   return (
     <>
       <nav className="breadcrumbs" aria-label="Breadcrumb">
@@ -62,11 +64,8 @@ export default function AccountOrderPage() {
 
       <h2>Items</h2>
       <div className="account-items">
-        {order.items.map((item) => (
-          <div
-            className="track-item"
-            key={`${item.productId}-${item.variantLabel}`}
-          >
+        {orderItems.map((item) => (
+          <div className="track-item" key={item.lineId}>
             <Image
               src={item.image}
               alt=""

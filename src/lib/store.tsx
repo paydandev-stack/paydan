@@ -71,6 +71,7 @@ type Actions = {
   saveForLater: (productId: string, variantId: string) => void;
   moveToCart: (productId: string, variantId: string) => void;
   toggleWishlist: (productId: string) => void;
+  recordProductView: (productId: string) => void;
   placeOrder: (input: PlaceOrderInput) => Promise<Order>;
   updateOrderStatus: (
     orderId: string,
@@ -103,6 +104,9 @@ type Actions = {
         | "restricted"
         | "facets"
         | "subcategories"
+        | "shortDescription"
+        | "homepageVisible"
+        | "homepageOrder"
       >
     >,
   ) => void;
@@ -142,7 +146,7 @@ type Actions = {
   setDefaultAddress: (id: string) => void;
   createReturn: (input: {
     orderId: string;
-    productId: string;
+    lineId: string;
     quantity: number;
     reason: string;
     detail: string;
@@ -291,6 +295,7 @@ export function DemoProvider({
       "saveForLater",
       "moveToCart",
       "toggleWishlist",
+      "recordProductView",
       "placeOrder",
       "updateOrderStatus",
       "updateVendorStage",
@@ -360,8 +365,17 @@ export function DemoProvider({
         );
       }
     };
-    result.resetDemo = () =>
-      notify("Demo state has been replaced with your secure account.", "info");
+    result.resetDemo = () => {
+      if (state.dataScope !== "test") {
+        notify("Reset is available only for the private test account.", "info");
+        return;
+      }
+      void run("resetTestData", [])
+        .then(() =>
+          notify("Test data restored to the approved fixture.", "success"),
+        )
+        .catch(() => {});
+    };
     result.addToCart = (productId: string, variantId: string, quantity = 1) => {
       if (!state.customerSession) {
         rememberIntent({ productId, variantId, quantity, path: "/cart" });
@@ -411,7 +425,7 @@ export function DemoProvider({
       void run("toggleWishlist", [id]).catch(() => {});
     };
     return result as unknown as Actions;
-  }, [notify, run, state.customerSession, state.cart]);
+  }, [notify, run, state.customerSession, state.cart, state.dataScope]);
   return (
     <DemoContext.Provider
       value={{

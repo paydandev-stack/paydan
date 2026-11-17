@@ -19,6 +19,7 @@ import {
   returnStatusMeta,
   sourcingStatusMeta,
 } from "@/lib/status";
+import { hasCapability } from "@/lib/capabilities";
 type ProfilePatch = Pick<
   Customer,
   "name" | "email" | "phone" | "city" | "state" | "notes"
@@ -27,9 +28,11 @@ type ProfilePatch = Pick<
 function ProfileForm({
   customer,
   onSave,
+  canEditNotes,
 }: {
   customer: Customer;
   onSave: (patch: ProfilePatch) => void;
+  canEditNotes: boolean;
 }) {
   const [form, setForm] = useState<ProfilePatch>({
     name: customer.name,
@@ -60,6 +63,7 @@ function ProfileForm({
         label="Name"
         required
         value={form.name}
+        readOnly
         onChange={(event) => setForm({ ...form, name: event.target.value })}
       />
       <AdminTextField
@@ -67,21 +71,25 @@ function ProfileForm({
         type="email"
         required
         value={form.email}
+        readOnly
         onChange={(event) => setForm({ ...form, email: event.target.value })}
       />
       <AdminTextField
         label="Phone"
         value={form.phone}
+        readOnly
         onChange={(event) => setForm({ ...form, phone: event.target.value })}
       />
       <AdminTextField
         label="City"
         value={form.city}
+        readOnly
         onChange={(event) => setForm({ ...form, city: event.target.value })}
       />
       <AdminTextField
         label="State"
         value={form.state}
+        readOnly
         onChange={(event) => setForm({ ...form, state: event.target.value })}
       />
       <div className="admin-field">
@@ -102,16 +110,19 @@ function ProfileForm({
         wide
         hint="Visible to operators only — never shown to the customer."
         value={form.notes}
+        readOnly={!canEditNotes}
         onChange={(event) => setForm({ ...form, notes: event.target.value })}
       />
-      <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-        <button type="button" onClick={reset}>
-          Reset
-        </button>
-        <button type="submit" className="primary">
-          Save profile
-        </button>
-      </div>
+      {canEditNotes ? (
+        <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+          <button type="button" onClick={reset}>
+            Reset
+          </button>
+          <button type="submit" className="primary">
+            Save profile
+          </button>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -124,6 +135,10 @@ export default function AdminCustomerDetailPage() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const customer = state.customers.find((item) => item.id === id);
   if (!customer) notFound();
+  const canEditNotes = hasCapability(
+    state.adminSession?.role,
+    "customers.support-note",
+  );
   const orders = [
     ...state.orders
       .filter((order) => order.customerId === customer.id)
@@ -152,7 +167,7 @@ export default function AdminCustomerDetailPage() {
   ];
   const saveProfile = async (patch: ProfilePatch) => {
     try {
-      await actions.updateCustomer(customer.id, patch);
+      await actions.updateCustomer(customer.id, { notes: patch.notes });
       actions.notify(`Profile saved for ${patch.name}`, "success");
     } catch (error) {}
   };
@@ -173,7 +188,11 @@ export default function AdminCustomerDetailPage() {
         <div style={{ display: "grid", gap: "1rem", minWidth: 0 }}>
           <section className="admin-card">
             <h2>Profile</h2>
-            <ProfileForm customer={customer} onSave={saveProfile} />
+            <ProfileForm
+              customer={customer}
+              onSave={saveProfile}
+              canEditNotes={canEditNotes}
+            />
           </section>
 
           <section className="admin-card">

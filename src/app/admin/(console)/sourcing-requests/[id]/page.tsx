@@ -18,8 +18,8 @@ import {
   todayISO,
 } from "@/lib/format";
 import { sourcingStatusMeta, type Tone } from "@/lib/status";
-import { categoryName } from "@/data/categories";
 import type { Quote, SourcingStatus } from "@/lib/types";
+import { hasCapability } from "@/lib/capabilities";
 type DraftLine = {
   id: string;
   description: string;
@@ -122,7 +122,7 @@ export default function AdminSourcingRequestPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.id]);
   if (!request) notFound();
-  if (state.adminSession?.role === "Support")
+  if (!hasCapability(state.adminSession?.role, "sourcing.write"))
     return (
       <>
         <AdminPageHeader
@@ -366,7 +366,11 @@ export default function AdminSourcingRequestPage() {
               </div>
               <div>
                 <span>Category</span>
-                <strong>{categoryName(request.categorySlug)}</strong>
+                <strong>
+                  {state.categories.find(
+                    (category) => category.slug === request.categorySlug,
+                  )?.name ?? request.categorySlug}
+                </strong>
               </div>
               <div>
                 <span>Quantity</span>

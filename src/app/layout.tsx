@@ -25,17 +25,22 @@ const newsreader = localFont({
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Paydan — one storefront, a whole network behind it",
-    template: "%s · Paydan",
-  },
-  description:
-    "Paydan lists products from many Nigerian suppliers under one trusted storefront, then coordinates the sourcing and delivery of every order itself.",
-  applicationName: "Paydan",
-  icons: { icon: "/favicon.svg" },
-  robots: { index: false, follow: false },
-};
+const indexingEnabled = process.env.SITE_INDEXING_ENABLED === "true";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const state = await publicCatalogSnapshot();
+  const storeName = state.settings.storeName || "Paydan";
+  return {
+    title: {
+      default: `${storeName} — one storefront, a whole network behind it`,
+      template: `%s · ${storeName}`,
+    },
+    description: `${storeName} lists products from many Nigerian suppliers under one trusted storefront, then coordinates the sourcing and delivery of every order itself.`,
+    applicationName: storeName,
+    icons: { icon: "/favicon.svg" },
+    robots: { index: indexingEnabled, follow: indexingEnabled },
+  };
+}
 
 export default async function RootLayout({
   children,

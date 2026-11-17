@@ -4,7 +4,7 @@ import {
   body,
   failure,
   json,
-  requireRole,
+  requireCapability,
   requireUser,
   sameOrigin,
   viewer,
@@ -13,7 +13,7 @@ import { refundReturn, verifyRefund } from "@/server/refunds";
 export async function GET(request: Request) {
   try {
     const user = await viewer(request.headers);
-    requireRole(user, ["Order Manager"]);
+    requireCapability(user, "returns.read");
     return json(
       (
         await database().query(
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     sameOrigin(request);
     const user = await viewer(request.headers);
     requireUser(user);
-    requireRole(user, ["Order Manager"]);
+    requireCapability(user, "refunds.issue");
     const input = await body(request);
     if (input.action === "verify") {
       const id = z.string().max(100).parse(input.providerId);

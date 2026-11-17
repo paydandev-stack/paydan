@@ -4,7 +4,7 @@ import Image from "@/components/safe-image";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { rememberIntent } from "@/lib/intent";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ProductCard } from "@/components/product-card";
 import { HeartIcon, MinusIcon, PlusIcon, StarIcon } from "@/components/icons";
 import { money, percentOff, plural } from "@/lib/format";
@@ -12,21 +12,72 @@ import { availabilityMeta } from "@/lib/status";
 import { useDemo } from "@/lib/store";
 import { visibleProducts } from "@/lib/catalog";
 import { toViewerProducts } from "@/lib/catalog-dto";
+import { api } from "@/lib/api-client";
+import type { Product } from "@/lib/types";
 
 const MAX_QUANTITY = 10;
 
 export default function ProductPage() {
   const params = useParams<{ slug: string }>();
-  const { state, actions } = useDemo();
+  const { state, actions, hydrated } = useDemo();
   const signedIn = Boolean(state.customerSession);
 
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
-  const product = state.products.find((item) => item.slug === slug);
+  const localProduct = state.products.find((item) => item.slug === slug);
+  const [remoteProduct, setRemoteProduct] = useState<Product | null>(null);
+  const [remoteRelated, setRemoteRelated] = useState<Product[]>([]);
+  const [lookupComplete, setLookupComplete] = useState(false);
+  const product = localProduct ?? remoteProduct;
 
   const [activeImage, setActiveImage] = useState(0);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const recordedView = useRef("");
 
+  useEffect(() => {
+    if (!hydrated || localProduct) {
+      if (localProduct) setLookupComplete(true);
+      return;
+    }
+    if (state.dataScope === "test") {
+      setLookupComplete(true);
+      return;
+    }
+    let current = true;
+    void api<{ product: Product; related: Product[] }>(
+      `/api/products/${encodeURIComponent(slug)}`,
+    )
+      .then((result) => {
+        if (!current) return;
+        setRemoteProduct(result.product);
+        setRemoteRelated(result.related);
+      })
+      .catch(() => {
+        if (current) setRemoteProduct(null);
+      })
+      .finally(() => {
+        if (current) setLookupComplete(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [hydrated, localProduct, slug, state.dataScope]);
+
+  useEffect(() => {
+    if (signedIn && product && recordedView.current !== product.id) {
+      recordedView.current = product.id;
+      actions.recordProductView(product.id);
+    }
+  }, [actions, product, signedIn]);
+
+  if (!product && !lookupComplete)
+    return (
+      <div className="wrap product-page">
+        <div className="empty">
+          <h3>Loading product…</h3>
+        </div>
+      </div>
+    );
   if (!product || product.status !== "published" || product.restricted)
     notFound();
 
@@ -43,13 +94,17 @@ export default function ProductPage() {
 
   // Guest-accessible page: the related strip receives viewer-scoped DTOs so an
   // anonymous visitor's bundle carries no monetary fields for these either.
+  const relatedSource = remoteRelated.length
+    ? remoteRelated
+    : visibleProducts(state.products)
+        .filter(
+          (item) =>
+            item.categorySlug === product.categorySlug &&
+            item.id !== product.id,
+        )
+        .slice(0, 5);
   const related = toViewerProducts(
-    visibleProducts(state.products)
-      .filter(
-        (item) =>
-          item.categorySlug === product.categorySlug && item.id !== product.id,
-      )
-      .slice(0, 5),
+    relatedSource,
     { pricesVisible: signedIn },
   );
 
@@ -73,7 +128,11 @@ export default function ProductPage() {
         <div className="pdp-gallery">
           <Image
             src={product.images[activeImage] ?? product.images[0]}
-            alt={product.name}
+            alt={
+              product.imageAlts?.[
+                product.images[activeImage] ?? product.images[0]
+              ] || product.name
+            }
             width={900}
             height={900}
             priority
@@ -88,7 +147,12 @@ export default function ProductPage() {
                 aria-pressed={index === activeImage}
                 onClick={() => setActiveImage(index)}
               >
-                <Image src={image} alt="" width={90} height={90} />
+                <Image
+                  src={image}
+                  alt={product.imageAlts?.[image] || ""}
+                  width={90}
+                  height={90}
+                />
               </button>
             ))}
           </div>

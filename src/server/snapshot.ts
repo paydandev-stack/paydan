@@ -2,14 +2,22 @@ import "server-only";
 import { emptyState } from "@/lib/empty-state";
 import { toPublicProduct, toMemberProduct } from "@/lib/catalog-dto";
 import type { DemoState, Order, Product, SourcingRequest } from "@/lib/types";
+import {
+  isCustomerVisibleCategory,
+  isCustomerVisibleProduct,
+} from "@/lib/catalog-visibility";
+import { normalizedOrderItems } from "@/lib/order-lines";
 import { database, records, record } from "./db";
 import type { Viewer } from "./http";
 import { isTestBuyer } from "./test-buyer";
+import { notificationsFor, testNotificationsFor } from "./notifications";
+import { hasCapability, type AdminCapability } from "@/lib/capabilities";
 
 export function customerOrder(order: Order) {
+  const items = normalizedOrderItems(order);
   return {
     ...order,
-    items: order.items.map(
+    items: items.map(
       ({ costPrice: _cost, vendorId: _vendor, ...item }) => item,
     ),
     shipments: order.vendorGroups.map((group, index) => ({
@@ -54,7 +62,7 @@ export async function snapshot(
     state.products = products
       .filter((p) => p.status === "published" && !p.restricted)
       .map(toPublicProduct) as unknown as Product[];
-    state.categories = categories.filter((category) => !category.restricted);
+    state.categories = categories.filter(isCustomerVisibleCategory);
     state.banners = seedBanners;
     return state;
   }
@@ -70,6 +78,7 @@ export async function snapshot(
     (state[kind] as unknown[]) = await records(db, kind);
   }
   const testBuyer = isTestBuyer(user);
+  state.dataScope = testBuyer ? "test" : "production";
   if (testBuyer && user) {
     state.products = await records(db, "testProducts", user.id);
     state.shippingZones = await records(db, "testShippingZones", user.id);
@@ -79,21 +88,25 @@ export async function snapshot(
     ...(await record(db, "settings", "store")),
     transferEnabled: false,
   };
+  if (!operations || !hasCapability(user?.role, "settings.manage")) {
+    const {
+      orderNotificationEmail: _orderNotificationEmail,
+      supportNotificationEmail: _supportNotificationEmail,
+      ...publicSettings
+    } = state.settings;
+    state.settings = publicSettings;
+  }
   if (!operations || user?.role === "Support") {
-    const restrictedCategories = new Set(
-      state.categories
-        .filter((category) => category.restricted)
-        .map((category) => category.slug),
+    const categoryBySlug = new Map(
+      state.categories.map((category) => [category.slug, category]),
     );
-    state.categories = state.categories.filter(
-      (category) => category.active !== false && !category.restricted,
-    );
+    state.categories = state.categories.filter(isCustomerVisibleCategory);
     state.products = state.products
-      .filter(
-        (p) =>
-          p.status === "published" &&
-          !p.restricted &&
-          !restrictedCategories.has(p.categorySlug),
+      .filter((product) =>
+        isCustomerVisibleProduct(
+          product,
+          categoryBySlug.get(product.categorySlug),
+        ),
       )
       .map(user ? toMemberProduct : toPublicProduct) as unknown as Product[];
     state.banners = state.banners.filter(
@@ -115,21 +128,29 @@ export async function snapshot(
       "location",
       "lastOrderId",
       "lastSourcingReference",
+      "recentlyViewed",
     ] as const) {
       if (account?.[key] !== undefined)
         Object.assign(state, { [key]: account[key] });
     }
-    state.orders = (await records<Order>(db, testBuyer ? "testOrders" : "orders", user.id)).map(
-      customerOrder,
-    ) as unknown as Order[];
+    state.orders = (
+      await records<Order>(db, testBuyer ? "testOrders" : "orders", user.id)
+    ).map(customerOrder) as unknown as Order[];
     state.sourcing = (
-      await records<SourcingRequest>(db, testBuyer ? "testSourcing" : "sourcing", user.id)
+      await records<SourcingRequest>(
+        db,
+        testBuyer ? "testSourcing" : "sourcing",
+        user.id,
+      )
     ).map(customerRequest) as SourcingRequest[];
     state.returns = await records(
       db,
       testBuyer ? "testReturns" : "returns",
       user.id,
     );
+    state.notifications = testBuyer
+      ? await testNotificationsFor(db, user.id)
+      : await notificationsFor(db, user.id);
     const profile = await record<{
       phone?: string;
       city?: string;
@@ -150,25 +171,22 @@ export async function snapshot(
     ];
     if (operations) {
       state.adminSession = { id: user.id, name: user.name, role: user.role! };
-      const accessible: Record<string, string[]> = {
-        "Super Admin": [
-          "products",
-          "vendors",
-          "customers",
-          "orders",
-          "sourcing",
-          "vouchers",
-          "returns",
-          "team",
-          "audit",
-        ],
-        "Catalog Manager": ["products", "vendors", "vouchers"],
-        "Order Manager": ["orders", "vendors", "returns", "customers"],
-        "Procurement Manager": ["orders", "vendors", "sourcing"],
-        Support: ["orders", "customers", "sourcing", "returns"],
-      };
-      for (const kind of accessible[user.role!] ?? [])
-        Object.assign(state, { [kind]: await records(db, kind) });
+      const recordCapabilities: Array<
+        readonly [keyof DemoState, string, AdminCapability]
+      > = [
+        ["products", "products", "catalog.read"],
+        ["vendors", "vendors", "vendors.read"],
+        ["customers", "customers", "customers.read"],
+        ["orders", "orders", "orders.read"],
+        ["sourcing", "sourcing", "sourcing.read"],
+        ["vouchers", "vouchers", "promotions.write"],
+        ["returns", "returns", "returns.read"],
+        ["team", "team", "team.manage"],
+        ["audit", "audit", "audit.read"],
+      ];
+      for (const [stateKey, recordKind, capability] of recordCapabilities)
+        if (hasCapability(user.role, capability))
+          Object.assign(state, { [stateKey]: await records(db, recordKind) });
       if (user.role === "Support") {
         state.orders = state.orders.map(customerOrder) as unknown as Order[];
         state.sourcing = state.sourcing.map(
@@ -176,6 +194,30 @@ export async function snapshot(
         ) as SourcingRequest[];
       }
     }
+  }
+  if (!operations && !testBuyer) {
+    const requiredProductIds = new Set<string>([
+      ...state.cart.map((line) => line.productId),
+      ...state.savedForLater.map((line) => line.productId),
+      ...state.wishlist,
+      ...state.recentlyViewed,
+      ...state.orders.flatMap((order) =>
+        order.items.map((item) => item.productId),
+      ),
+    ]);
+    const merchandisingIds = [...state.products]
+      .sort(
+        (left, right) =>
+          Number(right.featured) - Number(left.featured) ||
+          Number(right.newArrival) - Number(left.newArrival) ||
+          Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      )
+      .slice(0, 48)
+      .map((product) => product.id);
+    merchandisingIds.forEach((id) => requiredProductIds.add(id));
+    state.products = state.products.filter((product) =>
+      requiredProductIds.has(product.id),
+    );
   }
   return state;
 }

@@ -16,6 +16,9 @@ export default function NewCategory() {
     order: 0,
     active: true,
     restricted: false,
+    shortDescription: "",
+    homepageVisible: true,
+    homepageOrder: 0,
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,7 +43,9 @@ export default function NewCategory() {
     <>
       <h1>Create department</h1>
       <form className="operations-form" onSubmit={submit}>
-        {(["name", "slug", "title", "description"] as const).map((key) => (
+        {(
+          ["name", "slug", "title", "description", "shortDescription"] as const
+        ).map((key) => (
           <label key={key}>
             {key}
             <input
@@ -57,7 +62,11 @@ export default function NewCategory() {
             min={0}
             value={form.order}
             onChange={(e) =>
-              setForm({ ...form, order: Number(e.target.value) })
+              setForm({
+                ...form,
+                order: Number(e.target.value),
+                homepageOrder: Number(e.target.value),
+              })
             }
           />
         </label>
@@ -70,6 +79,16 @@ export default function NewCategory() {
             onChange={(e) => setForm({ ...form, restricted: e.target.checked })}
           />{" "}
           Restricted department
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={form.homepageVisible}
+            onChange={(e) =>
+              setForm({ ...form, homepageVisible: e.target.checked })
+            }
+          />{" "}
+          Show on homepage
         </label>
         {error && <p role="alert">{error}</p>}
         <button className="admin-btn" disabled={busy || !form.image}>

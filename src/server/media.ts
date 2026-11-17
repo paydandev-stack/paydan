@@ -9,10 +9,18 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { z } from "zod";
-import { database } from "./db";
-import { HttpError, requireRole, type Viewer } from "./http";
+import { database, records } from "./db";
+import {
+  HttpError,
+  requireAnyCapability,
+  requireCapability,
+  type Viewer,
+} from "./http";
 import { catalogCdnUrl } from "./media-delivery";
 import { signedCloudFrontUrl } from "./cloudfront";
+import { isTestBuyer } from "./test-buyer";
+import { writeAudit } from "./audit";
+import type { Banner, Product } from "@/lib/types";
 type Media = {
   id: string;
   owner_id: string;
@@ -58,10 +66,10 @@ export async function beginUpload(user: Viewer, input: unknown) {
       size: z.number().int().min(1).max(5242880),
     })
     .parse(input);
-  if (value.purpose === "catalog") requireRole(user, ["Catalog Manager"]);
+  if (value.purpose === "catalog") requireCapability(user, "catalog.write");
   const { publicClient, bucket } = config();
   const id = randomUUID();
-  const key = `incoming/${user.id}/${id}`;
+  const key = `${isTestBuyer(user) ? "test/" : ""}incoming/${user.id}/${id}`;
   const post = await createPresignedPost(publicClient, {
     Bucket: bucket,
     Key: key,
@@ -85,7 +93,7 @@ export async function finalizeUpload(user: Viewer, id: string) {
   );
   const media: Media = result.rows[0];
   if (!media) throw new HttpError(404, "Upload not found.");
-  if (media.purpose === "catalog") requireRole(user, ["Catalog Manager"]);
+  if (media.purpose === "catalog") requireCapability(user, "catalog.write");
   if (media.status === "ready")
     return {
       url:
@@ -119,7 +127,7 @@ export async function finalizeUpload(user: Viewer, id: string) {
   } catch {
     throw new HttpError(400, "The file is not a supported image.");
   }
-  const finalKey = `${media.purpose}/${randomUUID()}.webp`;
+  const finalKey = `${isTestBuyer(user) ? "test/" : ""}${media.purpose}/${randomUUID()}.webp`;
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -145,6 +153,15 @@ export async function finalizeUpload(user: Viewer, id: string) {
   await client.send(
     new DeleteObjectCommand({ Bucket: bucket, Key: media.object_key }),
   );
+  if (media.purpose === "catalog")
+    await writeAudit(database(), {
+      actor: user.email,
+      action: "media.finalized",
+      record: id,
+      capability: "catalog.write",
+      source: "admin",
+      after: { mime: "image/webp", size: image.length },
+    });
   return {
     url:
       (media.purpose === "catalog" && catalogCdnUrl(finalKey)) ||
@@ -159,7 +176,11 @@ export async function readMedia(id: string, user: Viewer | null) {
   const media: Media = result.rows[0];
   if (!media) throw new HttpError(404, "Image not found.");
   if (media.purpose !== "catalog" && user?.id !== media.owner_id)
-    requireRole(user, ["Procurement Manager", "Order Manager", "Support"]);
+    requireAnyCapability(user, [
+      "sourcing.read",
+      "returns.read",
+      "support.read",
+    ]);
   const cdnUrl =
     media.purpose === "catalog" ? catalogCdnUrl(media.object_key) : null;
   if (cdnUrl)
@@ -186,4 +207,56 @@ export async function readMedia(id: string, user: Viewer | null) {
     { expiresIn: 60 },
   );
   return { url, cacheControl: "private, no-store" };
+}
+
+export async function cleanupOrphanedCatalogMedia(limit = 50) {
+  const bounded = Math.max(1, Math.min(limit, 100));
+  const [candidates, products, banners] = await Promise.all([
+    database().query(
+      `SELECT id,object_key
+       FROM media
+       WHERE purpose='catalog' AND status='ready'
+         AND object_key LIKE 'catalog/%'
+         AND created_at < now() - interval '24 hours'
+       ORDER BY created_at LIMIT $1`,
+      [bounded],
+    ),
+    records<Product>(database(), "products"),
+    records<Banner>(database(), "banners"),
+  ]);
+  const references = new Set([
+    ...products.flatMap((product) => product.images),
+    ...banners.map((banner) => banner.image),
+  ]);
+  const { client, bucket } = config();
+  let deleted = 0;
+  let failed = 0;
+  for (const candidate of candidates.rows) {
+    const delivered = catalogCdnUrl(candidate.object_key);
+    if (
+      references.has(`/api/media/${candidate.id}`) ||
+      (delivered && references.has(delivered))
+    )
+      continue;
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: candidate.object_key,
+        }),
+      );
+      await database().query("DELETE FROM media WHERE id=$1", [candidate.id]);
+      await writeAudit(database(), {
+        actor: "system",
+        action: "media.orphan-deleted",
+        record: candidate.id,
+        source: "worker",
+        after: { objectKey: candidate.object_key },
+      });
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { scanned: candidates.rows.length, deleted, failed };
 }

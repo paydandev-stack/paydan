@@ -20,6 +20,8 @@ import { quoteSourced, prepareSourcedPayment } from "./sourced-orders";
 import { checkout, kobo, naira } from "./schemas";
 import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
 import { isTestBuyer } from "./test-buyer";
+import { isPurchasableVariant } from "@/lib/catalog-visibility";
+import { enqueueNotification } from "./notifications";
 
 type Input = ReturnType<typeof checkout.parse>;
 export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
@@ -37,19 +39,16 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
     const product = await record<Product>(db, "products", line.productId, true);
     const variant = product?.variants.find((v) => v.id === line.variantId);
     const category = product
-      ? await record<{ restricted: boolean }>(
+      ? await record<{ active?: boolean; restricted: boolean }>(
           db,
           "categories",
           product.categorySlug,
         )
       : null;
     if (
-      category?.restricted ||
       !product ||
-      product.status !== "published" ||
-      product.restricted ||
       !variant ||
-      variant.availability === "out_of_stock"
+      !isPurchasableVariant(product, category, variant)
     )
       throw new HttpError(
         409,
@@ -77,7 +76,10 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
       );
     subtotal += kobo(variant.price) * line.quantity;
     items.push({
+      lineId: randomUUID(),
       productId: product.id,
+      variantId: variant.id,
+      sku: variant.sku,
       name: product.name,
       variantLabel: variant.label,
       image: product.images[0],
@@ -439,7 +441,10 @@ export async function verifyPayment(reference: string, user?: Viewer) {
       data: {
         reference: order.reference,
         orderId: order.id,
-        amount: new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(order.total),
+        amount: new Intl.NumberFormat("en-NG", {
+          style: "currency",
+          currency: "NGN",
+        }).format(order.total),
       },
     });
     await enqueueOperationsAlert(db, {
@@ -448,6 +453,14 @@ export async function verifyPayment(reference: string, user?: Viewer) {
       title: "Payment confirmed",
       message: `Paystack confirmed payment for order ${order.reference}.`,
       href: `/admin/orders/${order.id}`,
+    });
+    await enqueueNotification(db, {
+      ownerId: order.customerId,
+      eventKey: `payment:${reference}:paid`,
+      type: "payment.received",
+      title: "Payment confirmed",
+      body: `Payment for ${order.reference} has been confirmed.`,
+      href: `/account/orders/${order.id}`,
     });
   });
   return { status: "paid", orderId: payment.order_id };

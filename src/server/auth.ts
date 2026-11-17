@@ -11,7 +11,9 @@ export async function enqueueMail(
 ) {
   const isReset = subject.toLowerCase().includes("reset");
   const url = body.match(/https?:\/\/\S+/)?.[0] || "";
-  const digest = createHash("sha256").update(url || body).digest("hex");
+  const digest = createHash("sha256")
+    .update(url || body)
+    .digest("hex");
   await enqueueSystemMail({
     eventKey: `auth:${isReset ? "reset" : "verify"}:${digest}`,
     eventType: isReset ? "auth.password_reset" : "auth.email_verification",

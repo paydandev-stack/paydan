@@ -56,15 +56,13 @@ The mobile work should reorganize the existing experience, not redesign the bran
 ### AI provider strategy
 
 - Use the Vercel AI SDK for streaming, typed tool calls and UI message parts.
-- Use Vercel AI Gateway for the two production model vendors so they can be evaluated, reordered and failed over without rewriting the feature.
-- Production slot 1 starts with `anthropic/claude-haiku-5.5` as the primary low-cost candidate.
-- Production slot 2 starts with `openai/gpt-6-luna` as the secondary provider/model and automatic production fallback.
-- Add a direct Groq adapter using `openai/gpt-oss-20b` and the Groq free-plan API key for development and Preview testing only. This is a third provider slot, not an unrestricted production fallback.
+- Send one compound Vercel AI Gateway request. It starts with `reflection/beam-free` and uses Gateway-native ordered fallback to `humansand/ampersand-v0.1`.
+- Keep a direct Groq adapter using `openai/gpt-oss-20b` completely independent of Gateway. It is the first external backup only when the compound Gateway request fails transiently before producing meaningful output.
 - Always retain a final deterministic non-AI fallback that returns normal catalogue/search/support links when no permitted model succeeds.
-- In the default test profile, Groq runs by itself so free testing does not silently spend Gateway credits. An explicit `last` test mode may run Gateway primary, Gateway secondary, then Groq, but it must never be the default.
+- In the `test` profile, Groq may run by itself for deliberate free-provider testing. Production and `test-last` use the compound Gateway request before Groq.
 - Do not permanently select production ordering until both production models run the PAYDAN evaluation suite. Run the same safe read-only evaluation against Groq to measure whether it is adequate for testing.
 - Set Gateway project and key budgets before enabling production traffic.
-- Never send real customer/order data through the free Groq test profile; use synthetic catalogue, account and order fixtures.
+- Review the data handling and retention of every provider before sending production customer data. Keep test/evaluation conversations synthetic.
 
 ### Search strategy
 
@@ -129,67 +127,56 @@ Create a small provider-neutral module, for example:
 Responsibilities:
 
 - Read and validate the selected routing profile and its provider credentials.
-- Select the primary production model, secondary production model, or isolated Groq test model.
-- Configure the Gateway model fallback array in the order `AI_MODEL_PRIMARY`, then `AI_MODEL_SECONDARY`.
-- Prevent the Groq test adapter from running when `VERCEL_ENV=production` or `NODE_ENV=production`, even if a stale variable tries to enable it.
+- Configure one Gateway model with `AI_PRIMARY_MODEL` and a native fallback array containing `AI_SECONDARY_MODEL`.
+- Configure direct Groq separately from Gateway and invoke it only after an eligible pre-output Gateway failure.
 - Apply conservative generation limits, tool-step limits and timeouts.
-- Fail over only for transient provider/network errors, timeouts, rate limits and provider 5xx failures. Do not mask authentication, invalid-request, safety, authorization, schema or application-tool errors by trying another model.
-- Do not replay a write tool or confirmed cart mutation during provider failover. Provider selection happens before a write, while server-side action receipts remain idempotent.
+- Fail over only for timeouts, network failures, `408`, `429` and provider `5xx` responses. Do not mask authentication, invalid-request, authorization, schema, malformed-tool or application-tool errors by trying another model.
+- Never fail over after text, a tool call or a tool result has reached the user. Browser cancellation also stops routing without trying another provider.
+- Do not replay a write tool or confirmed cart mutation during provider failover. Server-side action receipts remain idempotent.
 - Attach non-PII observability tags such as access tier and route.
-- Record which provider/model served the request, which fallback was attempted, latency, token usage and a sanitized failure class.
+- Record only provider/model, fallback attempt, latency, token usage, status and a sanitized failure class. Do not log prompts, provider response bodies, secrets or customer PII.
 - Return the existing graceful unavailable response when AI is disabled.
 
-Proposed shared and production variables:
+Canonical variables:
 
 ```env
-AI_ENABLED=false
-AI_ROUTING_PROFILE=production
-AI_GATEWAY_API_KEY=
-AI_MODEL_PRIMARY=anthropic/claude-haiku-5.5
-AI_MODEL_SECONDARY=openai/gpt-6-luna
+AI_PROVIDER_PROFILE=production
 AI_PROVIDER_TIMEOUT_MS=12000
-AI_TOTAL_TIMEOUT_MS=25000
-```
-
-Proposed development/Preview Groq variables:
-
-```env
-AI_ROUTING_PROFILE=test
-AI_TEST_GROQ_ENABLED=true
-AI_TEST_GROQ_MODE=only
-AI_GROQ_BASE_URL=https://api.groq.com/openai/v1
-AI_GROQ_API_KEY=
-AI_GROQ_MODEL=openai/gpt-oss-20b
+AI_GATEWAY_API_KEY=
+AI_PRIMARY_MODEL=reflection/beam-free
+AI_SECONDARY_MODEL=humansand/ampersand-v0.1
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 Allowed routing profiles and behaviour:
 
-| Profile | Provider order | Intended environment |
-|---|---|---|
-| `production` | Gateway primary -> Gateway secondary -> deterministic non-AI fallback | Production; Groq test variables are ignored |
-| `test`, Groq mode `only` | Groq -> deterministic non-AI fallback | Local development and Vercel Preview; default free-testing mode |
-| `test`, Groq mode `last` | Gateway primary -> Gateway secondary -> Groq -> deterministic non-AI fallback | Explicit failover QA only; may consume Gateway credits |
+| Profile      | Provider order                                                                                              | Intended environment                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `production` | Compound Gateway request -> direct Groq on eligible transient pre-output failure -> deterministic assistant | Production                                 |
+| `test`       | Direct Groq -> deterministic assistant                                                                      | Deliberate local/Preview Groq-only testing |
+| `test-last`  | Compound Gateway request -> direct Groq on eligible failure -> deterministic assistant                      | Explicit full-route QA                     |
 
-`AI_GATEWAY_API_KEY` authenticates both production model slots through Vercel AI Gateway. Direct `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` variables are not required unless PAYDAN later enables Gateway BYOK. `AI_GROQ_API_KEY` is separate and is accepted only by the test-only Groq adapter.
+`AI_GATEWAY_API_KEY` authenticates Gateway outside environments where Vercel OIDC is available. Direct `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` variables are not required. `GROQ_API_KEY` is a separate server-only credential used by the direct Groq adapter.
 
-Update `.env.example`, `.env.vercel` and `scripts/check-config.ts` as part of implementation. Keep the current `AI_CHAT_COMPLETIONS_URL`, `AI_API_KEY` and `AI_MODEL` variables until the new adapter passes tests and deployment has migrated; then mark them deprecated, remove their reads, and remove them from the environment files in a later cleanup commit.
+Update `.env.example`, deployment secrets and `scripts/check-config.ts` as part of implementation. Reject the retired `AI_GROQ_*` and `AI_TEST_GROQ_*` names so environments cannot silently diverge. Never copy real secrets into examples or committed files.
 
 ### 5.2 Server-controlled tools
 
 Implement each tool in its own module under `src/server/ai/tools/`. All inputs and outputs use strict Zod schemas.
 
-| Tool | Access | Behaviour |
-|---|---|---|
-| `search_catalog` | Guest/member | Ranked search across all published, unrestricted products; guest output contains no money fields. |
-| `get_product_details` | Guest/member | Current product, variant and availability details; viewer-scoped DTO. |
-| `compare_products` | Guest/member | Deterministic attribute comparison; price columns exist only for members. |
-| `get_current_cart` | Member | Current viewer's cart only. |
-| `propose_cart_change` | Member; guest handoff | Creates a reviewable proposal; never mutates the cart. |
-| `get_my_orders` | Member | Current viewer's sanitized orders only. |
-| `get_shipping_options` | Guest/member | Returns available zones and honest estimates; final fee remains a checkout calculation. |
-| `search_policies` | Guest/member | Searches approved published policy copy. |
-| `draft_sourcing_request` | Guest/member | Creates a client-visible draft, not a submitted request. |
-| `draft_support_handoff` | Member | Prepares a support summary for customer review and submission. |
+| Tool                     | Access                | Behaviour                                                                                         |
+| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------- |
+| `search_catalog`         | Guest/member          | Ranked search across all published, unrestricted products; guest output contains no money fields. |
+| `get_product_details`    | Guest/member          | Current product, variant and availability details; viewer-scoped DTO.                             |
+| `compare_products`       | Guest/member          | Deterministic attribute comparison; price columns exist only for members.                         |
+| `get_current_cart`       | Member                | Current viewer's cart only.                                                                       |
+| `propose_cart_change`    | Member; guest handoff | Creates a reviewable proposal; never mutates the cart.                                            |
+| `get_my_orders`          | Member                | Current viewer's sanitized orders only.                                                           |
+| `get_shipping_options`   | Guest/member          | Returns available zones and honest estimates; final fee remains a checkout calculation.           |
+| `search_policies`        | Guest/member          | Searches approved published policy copy.                                                          |
+| `draft_sourcing_request` | Guest/member          | Creates a client-visible draft, not a submitted request.                                          |
+| `draft_support_handoff`  | Member                | Prepares a support summary for customer review and submission.                                    |
 
 No customer-facing tool may initialize Paystack, mark payment successful, place an order, cancel a paid order, alter fulfilment or create a refund.
 
@@ -377,9 +364,9 @@ Preserve the vertical sticky department rail on desktop and tablet. On phones:
 - Never ask for passwords, OTPs, card details or API keys.
 - Require confirmation for every write action.
 - Maintain a hard deny list for payments, refunds, discounts, fulfilment and staff operations.
-- Treat `AI_GATEWAY_API_KEY` and `AI_GROQ_API_KEY` as server-only secrets; never prefix them with `NEXT_PUBLIC_`, serialize them to the browser, log them, or commit them.
-- Enforce the Groq test-only environment guard in code, not merely through Vercel dashboard conventions.
-- Use synthetic users, orders and conversations in the free Groq profile. Production customer traffic must use the approved production routing profile.
+- Treat `AI_GATEWAY_API_KEY` and `GROQ_API_KEY` as server-only secrets; never prefix them with `NEXT_PUBLIC_`, serialize them to the browser, log them, or commit them.
+- Rotate any provider key exposed in local output, chat or logs before deployment.
+- Use synthetic users, orders and conversations during provider evaluations and free-tier QA.
 
 ## 8. Evaluation and QA
 
@@ -445,7 +432,7 @@ Acceptance criteria:
 
 - Capture mobile screenshots and performance/accessibility baselines for required routes.
 - Create the AI evaluation dataset and mock tool harness.
-- Add the AI feature flag, routing-profile validation, Gateway budget and test-only Groq guard.
+- Add routing-profile validation, Gateway budgets and secret-handling guardrails.
 - Add the final mobile CSS layer and shared safe-area variables.
 
 ### Milestone 1 — Mobile shell
@@ -468,7 +455,7 @@ Acceptance criteria:
 - Add product-result and comparison components.
 - Add context-aware starters.
 - Complete guest/member price handling through tool DTOs.
-- Add Gateway primary/secondary failover, isolated Groq test routing, deterministic fallback, observability and evaluation runs.
+- Add Gateway-native primary/secondary fallback, transient-only direct Groq routing, deterministic fallback, no-replay protection, sanitized observability and evaluation runs.
 
 This is the minimum valuable AI release.
 
