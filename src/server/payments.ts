@@ -151,12 +151,17 @@ export async function paystack(path: string, method = "GET", body?: unknown) {
     );
   return result.data;
 }
-export async function initialize(user: Viewer, input: Input, key: string) {
+export async function initialize(
+  user: Viewer,
+  input: Input,
+  key: string,
+  callbackUrl?: string,
+) {
   if (!process.env.PAYSTACK_SECRET_KEY)
     throw new HttpError(503, "Paystack is not configured yet.");
   if (input.orderId) {
     await prepareSourcedPayment(user, input.orderId, input);
-    return resumePayment(user, input.orderId);
+    return resumePayment(user, input.orderId, callbackUrl);
   }
   const order = await transaction(async (db) => {
     await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [user.id]);
@@ -262,29 +267,35 @@ export async function initialize(user: Viewer, input: Input, key: string) {
     );
     return value;
   });
-  return resumePayment(user, order.id);
+  return resumePayment(user, order.id, callbackUrl);
 }
-export async function resumePayment(user: Viewer, orderId: string) {
+export async function resumePayment(
+  user: Viewer,
+  orderId: string,
+  callbackUrl?: string,
+) {
   const result = await database().query(
     "SELECT * FROM payment WHERE order_id=$1 AND owner_id=$2",
     [orderId, user.id],
   );
   const payment = result.rows[0];
   if (!payment) throw new HttpError(404, "Payment not found.");
-  if (payment.status === "paid") return { orderId, status: "paid" };
+ if (payment.status === "paid")
+ return { orderId, reference: payment.reference, status: "paid" };
   if (payment.status !== "pending")
     throw new HttpError(
       409,
       "This payment attempt is closed. Review your cart and start a new checkout.",
     );
-  if (payment.authorization_url)
-    return { orderId, url: payment.authorization_url };
+ if (payment.authorization_url)
+ return { orderId, reference: payment.reference, url: payment.authorization_url };
   const data = await paystack("/transaction/initialize", "POST", {
     email: payment.email,
     amount: Number(payment.amount_kobo),
     currency: "NGN",
     reference: payment.reference,
-    callback_url: `${process.env.BETTER_AUTH_URL}/checkout/success`,
+    callback_url:
+      callbackUrl ?? `${process.env.BETTER_AUTH_URL}/checkout/success`,
     metadata: { orderId: payment.order_id },
   });
   const url = new URL(data.authorization_url);
@@ -294,7 +305,7 @@ export async function resumePayment(user: Viewer, orderId: string) {
     "UPDATE payment SET authorization_url=$2 WHERE reference=$1",
     [payment.reference, url.href],
   );
-  return { orderId, url: url.href };
+ return { orderId, reference: payment.reference, url: url.href };
 }
 export function validSignature(
   raw: string,

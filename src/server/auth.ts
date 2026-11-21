@@ -1,4 +1,6 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { bearer } from "better-auth/plugins";
+import { expo } from "@better-auth/expo";
 import { database } from "./db";
 import { createHash } from "node:crypto";
 import { enqueueSystemMail } from "./mail/queue";
@@ -35,6 +37,10 @@ export function auth() {
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
     trustedOrigins: trustedOrigins(),
+plugins: [
+bearer(),
+expo(),
+],
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 12,

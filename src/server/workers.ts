@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { database } from "./db";
 
-export type WorkerName = "mail" | "payments" | "media";
+export type WorkerName = "mail" | "payments" | "media" | "push";
 
 export async function runRecordedWorker<T extends Record<string, unknown>>(
   worker: WorkerName,

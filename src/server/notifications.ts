@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Notification } from "@/lib/types";
 import { put, records, type Queryable } from "./db";
 import { isTestBuyer } from "./test-buyer";
+import { enqueuePush, pushCategoryFor, pushHrefFor } from "./push/queue";
 
 export async function enqueueNotification(
   db: Queryable,
@@ -30,7 +31,19 @@ export async function enqueueNotification(
       input.eventKey,
     ],
   );
-  return (result.rowCount ?? 0) > 0;
+  const inserted = (result.rowCount ?? 0) > 0;
+// Fan out to Expo push from the same durable event (same transaction).
+// Push is best-effort: failures never roll back the notification row.
+if (inserted)
+await enqueuePush(db, {
+ownerId: input.ownerId,
+eventKey: `push:${input.eventKey}`,
+title: input.title,
+body: input.body,
+href: pushHrefFor(input.type, input.href),
+category: pushCategoryFor(input.type),
+});
+return inserted;
 }
 
 export async function notificationsFor(
