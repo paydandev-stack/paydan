@@ -27,10 +27,11 @@ return url.origin;
  * can safely extend the explicit application allowlist without trusting an
  * arbitrary Host or Origin supplied by a client.
  */
+const MOBILE_AUTH_ORIGINS = ["exp://", "paydan://"] as const;
+
 /**
- * Native app schemes (e.g. paydan://, https://paydan.store applinks)
- * approved for mobile OAuth callbacks and payment return links.
- * Set via MOBILE_APP_SCHEMES="paydan://,https://paydan.store".
+ * Native deep-link and payment return prefixes.
+ * Set via MOBILE_APP_SCHEMES="paydan://app,https://paydan.store".
  * Never disable origin validation globally - only these explicit values.
  */
 export function mobileSchemes(): string[] {
@@ -50,14 +51,14 @@ if (!value) return false;
 try {
 const candidate = new URL(value);
 if (candidate.username || candidate.password) return false;
-const prefixes = [...trustedOrigins(), ...mobileSchemes()];
+const prefixes = [...configuredTrustedOrigins(), ...mobileSchemes()];
 return prefixes.some((prefix) => value.startsWith(prefix));
 } catch {
 return false;
 }
 }
 
-export function trustedOrigins(): string[] {
+function configuredTrustedOrigins(): string[] {
 const values: Array<[string | undefined, string]> = [
 [process.env.BETTER_AUTH_URL, "BETTER_AUTH_URL"],
 ...(process.env.BETTER_AUTH_TRUSTED_ORIGINS || "")
@@ -84,6 +85,16 @@ values
 .map(([value, label]) => origin(value, label)),
 ),
 ];
+}
+
+/**
+ * Better Auth origins used by the Expo client. Expo Go sends exp://<dev-server>
+ * while standalone and development-client builds send paydan://. Better Auth
+ * matches a scheme-only custom origin against any host, so these cover the
+ * tunnel, LAN, and native callback variants without trusting an arbitrary URL.
+ */
+export function trustedOrigins(): string[] {
+return [...new Set([...configuredTrustedOrigins(), ...MOBILE_AUTH_ORIGINS])];
 }
 
 export function isTrustedOrigin(value: string | null): boolean {

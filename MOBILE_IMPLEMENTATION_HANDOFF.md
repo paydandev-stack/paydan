@@ -19,7 +19,7 @@ It is not yet production-ready in the literal sense of the plan, because live st
 - Added src/server/mobile-catalog.ts for viewer-scoped catalogue projections that hide guest prices and supplier fields.
 - Added src/server/push/queue.ts and worker.ts, src/app/api/cron/push/, migrations/007_push_tokens.sql, and migrations/008_push_outbox.sql for durable push fan-out and receipt handling.
 - Updated src/server/auth.ts with the official Better Auth Expo server integration while preserving browser sessions.
-- Updated src/server/origins.ts with the explicit MOBILE_APP_SCHEMES allowlist and mobile return-URL validation.
+- Updated src/server/origins.ts with the explicit MOBILE_APP_SCHEMES return-URL allowlist, Better Auth Expo origins for Expo Go and native builds, and mobile return-URL validation.
 - Updated src/server/payments.ts so checkout returns the server reference, mobile return URLs are accepted, and resumePayment returns the payment reference consistently.
 - Updated src/server/notifications.ts and src/server/workers.ts to enqueue push from the same durable domain events used by email.
 - Updated src/app/api/products/route.ts and src/app/api/products/[slug]/route.ts for the mobile-safe catalogue behavior.

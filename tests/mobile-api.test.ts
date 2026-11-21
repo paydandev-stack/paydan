@@ -76,7 +76,11 @@ import { auth } from "../src/server/auth";
 import { queryCatalog, productDetail } from "../src/server/mobile-catalog";
 import { toMobileError } from "../src/mobile-contract/errors";
 import { checkoutInitSchema } from "../src/mobile-contract/schemas";
-import { mobileSchemes, isMobileReturnUrl } from "../src/server/origins";
+import {
+  mobileSchemes,
+  isMobileReturnUrl,
+  trustedOrigins,
+} from "../src/server/origins";
 import { confirmAssistantProposal } from "../src/server/assistant";
 import { initialize, resumePayment, verifyPayment } from "../src/server/payments";
 import { GET as mobileCatalog } from "../src/app/api/mobile/v1/catalog/route";
@@ -504,6 +508,11 @@ expect(isMobileReturnUrl("paydan://app/checkout/success?ref=PD-1")).toBe(true);
 expect(isMobileReturnUrl("https://paydan.store/checkout/success")).toBe(true);
 expect(isMobileReturnUrl("https://evil.com/paydan://app")).toBe(false);
 expect(isMobileReturnUrl(undefined)).toBe(false);
+});
+it("trusts Expo Go and native Better Auth origins for mobile sign-in", () => {
+expect(trustedOrigins()).toEqual(
+  expect.arrayContaining(["exp://", "paydan://"]),
+);
 });
 it("rejects forged payment references for another viewer", async () => {
 await expect(verifyPayment("PD-forged-reference", bob)).rejects.toMatchObject({ status: 404 });
