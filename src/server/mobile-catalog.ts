@@ -5,6 +5,7 @@ import { toMemberProduct, toPublicProduct } from "@/lib/catalog-dto";
 import type { Product } from "@/lib/types";
 import { database } from "./db";
 import { HttpError, type Viewer } from "./http";
+import { isTestBuyer, productRecordKind } from "./test-buyer";
 import {
   catalogQuerySchema,
   type MobileCatalogQuery,
@@ -40,6 +41,14 @@ const csv = (value: string | undefined) =>
       ]
     : [];
 
+/** Demo buyers browse their private fixtures; everyone else uses production. */
+function productScope(user: Viewer | null) {
+  return {
+    kind: user ? productRecordKind(user) : "products",
+    owner: user && isTestBuyer(user) ? user.id : null,
+  };
+}
+
 /**
  * Shared catalogue query used by web (/api/products) and mobile
  * (/api/mobile/v1/catalog). Viewer-scoped price projection; guests never
@@ -61,6 +70,7 @@ export async function queryCatalog(
   const availability = csv(input.availability);
   const priceBands = user ? csv(input.priceBands) : [];
   const cursor = cursorState(input.cursor);
+  const scope = productScope(user);
   const orderBy =
     input.sort === "name"
       ? "lower(p.data->>'name') ASC,p.id ASC"
@@ -73,7 +83,8 @@ export async function queryCatalog(
             : "COALESCE((p.data->>'featured')::boolean,false) DESC, COALESCE((p.data->>'rating')::numeric,0) DESC, lower(p.data->>'name') ASC, p.id ASC";
 
   const filters = `
-p.kind='products'
+p.kind=$11
+AND ($12::text IS NULL OR p.owner_id=$12)
 AND p.data->>'status'='published'
 AND NOT COALESCE((p.data->>'restricted')::boolean,false)
 AND COALESCE((c.data->>'active')::boolean,true)
@@ -118,7 +129,14 @@ ON c.kind='categories' AND c.id=p.data->>'categorySlug'
 WHERE ${filters}
 ORDER BY ${orderBy}
 OFFSET $9 LIMIT $10`,
-    [...parameters, cursor.asOf, cursor.offset, input.limit + 1],
+    [
+      ...parameters,
+      cursor.asOf,
+      cursor.offset,
+      input.limit + 1,
+      scope.kind,
+      scope.owner,
+    ],
   );
   const hasMore = result.rows.length > input.limit;
   const rows = result.rows.slice(0, input.limit);
@@ -141,19 +159,21 @@ export async function productDetail(user: Viewer | null, slug: string) {
     .regex(/^[a-z0-9-]+$/)
     .max(200)
     .parse(slug);
+  const scope = productScope(user);
   const result = await database().query(
     `SELECT p.data
 FROM commerce_record p
 JOIN commerce_record c
 ON c.kind='categories' AND c.id=p.data->>'categorySlug'
-WHERE p.kind='products'
+WHERE p.kind=$2
+AND ($3::text IS NULL OR p.owner_id=$3)
 AND p.data->>'slug'=$1
 AND p.data->>'status'='published'
 AND NOT COALESCE((p.data->>'restricted')::boolean,false)
 AND COALESCE((c.data->>'active')::boolean,true)
 AND NOT COALESCE((c.data->>'restricted')::boolean,false)
 LIMIT 1`,
-    [clean],
+    [clean, scope.kind, scope.owner],
   );
   const product = result.rows[0]?.data as Product | undefined;
   if (!product) throw new HttpError(404, "Product not found.");
@@ -162,7 +182,8 @@ LIMIT 1`,
 FROM commerce_record p
 JOIN commerce_record c
 ON c.kind='categories' AND c.id=p.data->>'categorySlug'
-WHERE p.kind='products'
+WHERE p.kind=$3
+AND ($4::text IS NULL OR p.owner_id=$4)
 AND p.id<>$1
 AND p.data->>'categorySlug'=$2
 AND p.data->>'status'='published'
@@ -172,7 +193,7 @@ AND NOT COALESCE((c.data->>'restricted')::boolean,false)
 ORDER BY COALESCE((p.data->>'featured')::boolean,false) DESC,
 p.updated_at DESC
 LIMIT 5`,
-    [product.id, product.categorySlug],
+    [product.id, product.categorySlug, scope.kind, scope.owner],
   );
   const project = (value: Product) =>
     user ? toMemberProduct(value) : toPublicProduct(value);

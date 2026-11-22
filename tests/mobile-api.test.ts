@@ -245,6 +245,41 @@ expect(detail).not.toHaveProperty("costPrice");
 const guest = await productDetail(null, "phone");
 expect(guest.product).not.toHaveProperty("price");
 });
+it("scopes the demo buyer's private catalogue and product details", async () => {
+const previousTestBuyerEmail = process.env.TEST_BUYER_EMAIL;
+process.env.TEST_BUYER_EMAIL = "demo@example.com";
+try {
+const demoBuyer = {
+id: "demo-buyer",
+email: "demo@example.com",
+name: "Demo Buyer",
+};
+const demoProduct: Product = {
+...product,
+id: "demo-phone",
+slug: "demo-phone",
+name: "Demo phone",
+price: 999,
+variants: [{ ...product.variants[0], id: "demo-variant" }],
+};
+await put(database(), "testProducts", demoProduct.id, demoProduct, demoBuyer.id);
+
+const demoCatalog = await queryCatalog(demoBuyer, { limit: 10 });
+expect(demoCatalog.products.map((item) => item.id)).toEqual(["demo-phone"]);
+const demoDetail = await productDetail(demoBuyer, "demo-phone");
+expect(demoDetail.product).toMatchObject({ id: "demo-phone", price: 999 });
+
+const normalCatalog = await queryCatalog(alice, { limit: 10 });
+expect(normalCatalog.products.map((item) => item.id)).toEqual(["p1"]);
+await expect(productDetail(alice, "demo-phone")).rejects.toMatchObject({
+status: 404,
+});
+} finally {
+if (previousTestBuyerEmail === undefined)
+delete process.env.TEST_BUYER_EMAIL;
+else process.env.TEST_BUYER_EMAIL = previousTestBuyerEmail;
+}
+});
 it("lists only customer-visible departments", async () => {
 const response = await mobileDepartments(
 new Request("http://localhost:3000/api/mobile/v1/departments"),
