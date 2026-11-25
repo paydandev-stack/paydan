@@ -158,15 +158,9 @@ export default function ProductPage() {
         <div className="pdp-info">
           <span className="eyebrow">
             {category?.name ?? product.categorySlug} · {product.brand}
+            {product.vendorName ? ` · ${product.vendorName}` : ""}
           </span>
           <h1>{product.name}</h1>
-
-          {product.vendorName ? (
-            <p className="pdp-vendor">
-              <span>Vendor</span>
-              <strong>{product.vendorName}</strong>
-            </p>
-          ) : null}
 
           <p className="pdp-rating">
             <StarIcon /> {product.rating.toFixed(1)} ·{" "}
