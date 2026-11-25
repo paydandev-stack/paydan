@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -44,6 +44,12 @@ export default function AdminSourcingRequestsPage() {
     return matchesQuery && matchesStatus;
   });
   useEffect(() => setVisibleCount(50), [query, status]);
+  useEffect(() => {
+    const statusParam = new URLSearchParams(window.location.search).get(
+      "status",
+    );
+    if (statusParam) setStatus(statusParam);
+  }, []);
   const visibleRequests = visible.slice(0, visibleCount);
 
   const openQueue = sorted.filter(
@@ -62,6 +68,18 @@ export default function AdminSourcingRequestsPage() {
   );
   const underReview = sorted.filter((request) =>
     ["received", "under_review"].includes(request.status),
+  );
+  const now = Date.now();
+  const slaDueAt = (request: (typeof sorted)[number]) =>
+    Date.parse(request.submittedAt) +
+    (["received", "under_review"].includes(request.status) ? 24 : 72) *
+      60 *
+      60 *
+      1000;
+  const slaOpen = (request: (typeof sorted)[number]) =>
+    !["converted", "cancelled", "declined"].includes(request.status);
+  const overdue = sorted.filter(
+    (request) => slaOpen(request) && slaDueAt(request) < now,
   );
 
   const filtersActive = query.trim() !== "" || status !== ALL;
@@ -122,6 +140,11 @@ export default function AdminSourcingRequestsPage() {
             label: "Declined or cancelled",
             value: rejected.length,
             note: "Closed without an order",
+          },
+          {
+            label: "Past SLA",
+            value: overdue.length,
+            note: "24h review · 72h quote follow-up",
           },
         ]}
       />
@@ -184,8 +207,8 @@ export default function AdminSourcingRequestsPage() {
         </>
       ) : (
         <AdminTable
-          template="1fr 1.3fr .9fr 1.1fr .9fr"
-          head={["Request", "Product", "Customer", "Assignee", "Status"]}
+          template="1fr 1.3fr .9fr 1.1fr .9fr .9fr"
+          head={["Request", "Product", "Customer", "Assignee", "Status", "SLA"]}
           caption={`${plural(visible.length, "sourcing request")} matching the current filters`}
         >
           {visibleRequests.map((request) => (
@@ -207,6 +230,21 @@ export default function AdminSourcingRequestsPage() {
               <StatusPill tone={sourcingStatusMeta[request.status].tone}>
                 {sourcingStatusMeta[request.status].label}
               </StatusPill>
+              <span>
+                {!slaOpen(request) ? (
+                  "Closed"
+                ) : slaDueAt(request) < now ? (
+                  <StatusPill tone="red">Past due</StatusPill>
+                ) : (
+                  <small style={{ color: "var(--muted)" }}>
+                    {Math.max(
+                      1,
+                      Math.ceil((slaDueAt(request) - now) / 3_600_000),
+                    )}
+                    h left
+                  </small>
+                )}
+              </span>
             </div>
           ))}
         </AdminTable>

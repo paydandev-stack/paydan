@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "@/components/safe-image";
 import Link from "next/link";
@@ -126,6 +126,9 @@ export function AdminSidebar() {
         </div>
         <div className="admin-session-actions">
           <Link href="/">View storefront</Link>
+          {session?.role === "Super Admin" ? (
+            <Link href="/vendor/login">Vendor portal</Link>
+          ) : null}
           {session ? (
             <button type="button" onClick={actions.signOutAdmin}>
               Sign out
@@ -192,6 +195,9 @@ export function AdminMobileNav() {
               {item.label}
             </Link>
           ))}
+        {session?.role === "Super Admin" ? (
+          <Link href="/vendor/login">Vendor portal</Link>
+        ) : null}
         {session ? (
           <button
             type="button"

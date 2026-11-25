@@ -10,6 +10,7 @@ import type {
   ReturnRequest,
   SourcingRequest,
   TeamMember,
+  Vendor,
 } from "@/lib/types";
 import type { AdminCapability } from "@/lib/capabilities";
 import {
@@ -17,6 +18,7 @@ import {
   isPurchasableVariant,
 } from "@/lib/catalog-visibility";
 import { findOrderLine } from "@/lib/order-lines";
+import { publishReadiness } from "./product-readiness";
 import { emptyState } from "@/lib/empty-state";
 import { put, record, records, transaction, type Queryable } from "./db";
 import { HttpError, requireCapability, type Viewer } from "./http";
@@ -28,10 +30,16 @@ import {
   enqueueNotification,
   enqueueViewerNotification,
 } from "./notifications";
+import { issueVendorInvite, revokeVendorInvites } from "./vendor-invites";
 
 const commandCapabilities: Record<string, AdminCapability> = {
   saveShippingZone: "shipping.write",
   saveProduct: "catalog.write",
+  bulkProductStatus: "catalog.write",
+  duplicateProduct: "catalog.write",
+  bulkReassignProducts: "catalog.write",
+  importProducts: "catalog.write",
+  scheduleProductPublish: "catalog.write",
   setProductStatus: "catalog.write",
   saveCategory: "departments.write",
   updateCategory: "departments.write",
@@ -47,12 +55,24 @@ const commandCapabilities: Record<string, AdminCapability> = {
   saveBanner: "promotions.write",
   toggleBanner: "promotions.write",
   updateOrderStatus: "orders.fulfil",
+  bulkShipOrders: "orders.fulfil",
+  adjustStock: "inventory.write",
   updateVendorStage: "sourcing.write",
+  bulkUpdateVendorStages: "sourcing.write",
   addTeamMember: "team.manage",
   updateTeamMember: "team.manage",
+  createVendorAccount: "team.manage",
+  updateVendorAccount: "team.manage",
+  unlinkVendorAccount: "team.manage",
   updateSettings: "settings.manage",
   updateReturn: "returns.review",
 };
+
+function requireVendor(user: Viewer): string {
+  if (user.role !== "Vendor" || !user.vendorId)
+    throw new HttpError(403, "Vendor portal access is required.");
+  return user.vendorId;
+}
 
 export async function command(
   user: Viewer,
@@ -67,6 +87,18 @@ export async function command(
   return transaction(async (db) => {
     // A per-account lock serializes cart writes, including chat and checkout on different tabs.
     await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [user.id]);
+    if (user.role === "Vendor") {
+      const member = user.teamMemberId
+        ? await record<TeamMember>(db, "team", user.teamMemberId)
+        : undefined;
+      if (
+        !member ||
+        member.status !== "active" ||
+        member.role !== "Vendor" ||
+        member.vendorId !== user.vendorId
+      )
+        throw new HttpError(403, "This vendor account is not active.");
+    }
     const prior = await db.query(
       "SELECT digest,result FROM command_receipt WHERE owner_id=$1 AND key=$2",
       [user.id, key],
@@ -88,7 +120,8 @@ export async function command(
         action: name,
         record: String(args[0] && typeof args[0] === "string" ? args[0] : ""),
         capability,
-        source: user.role ? "admin" : "customer",
+        source:
+          user.role === "Vendor" ? "vendor" : user.role ? "admin" : "customer",
       });
     return result ?? null;
   });
@@ -298,8 +331,6 @@ async function execute(
   }
   if (name === "updateCustomer") {
     const editingAnotherCustomer = a !== user.id;
-    if (editingAnotherCustomer)
-      requireCapability(user, "customers.support-note");
     const patch = z
       .object({
         name: s.short.optional(),
@@ -308,40 +339,196 @@ async function execute(
         state: s.text.optional(),
         notes: s.text.optional(),
         email: z.email().optional(),
+        tags: z.array(s.short).max(30).optional(),
+        segments: z.array(s.short).max(30).optional(),
+        lifecycleStage: z
+          .enum(["new", "active", "at_risk", "inactive", "vip"])
+          .optional(),
+        marketingConsent: z.boolean().optional(),
       })
       .parse(b);
-    if (
-      editingAnotherCustomer &&
-      Object.keys(patch).some((key) => key !== "notes")
-    )
-      throw new HttpError(403, "Support can update internal notes only.");
+    const profileManagement = Object.keys(patch).some((key) => key !== "notes");
+    if (editingAnotherCustomer)
+      requireCapability(
+        user,
+        profileManagement ? "customers.manage" : "customers.support-note",
+      );
     if (a === user.id && patch.email && patch.email !== user.email)
       throw new HttpError(
         400,
         "Email changes require verification and cannot be made here.",
       );
     if (!user.role) delete patch.notes;
-    await put(
+    const before = await record<Record<string, unknown>>(
       db,
       "customers",
       s.id.parse(a),
-      {
-        ...(await record<Record<string, unknown>>(
-          db,
-          "customers",
-          s.id.parse(a),
-        )),
-        ...patch,
-        id: a,
-      },
-      s.id.parse(a),
     );
+    const after = {
+      ...before,
+      ...patch,
+      id: a,
+    };
+    await put(db, "customers", s.id.parse(a), after, s.id.parse(a));
     if (a === user.id && patch.name)
       await db.query('UPDATE "user" SET name=$1 WHERE id=$2', [
         patch.name,
         user.id,
       ]);
+    if (editingAnotherCustomer)
+      await writeAudit(db, {
+        actor: user.email,
+        action: "customers.profile-update",
+        record: String(a),
+        capability: profileManagement
+          ? "customers.manage"
+          : "customers.support-note",
+        source: "admin",
+        before,
+        after,
+      });
     return null;
+  }
+  if (name === "mergeCustomers") {
+    requireCapability(user, "customers.merge");
+    const input = z.object({ primaryId: s.id, secondaryId: s.id }).parse(a);
+    if (input.primaryId === input.secondaryId)
+      throw new HttpError(400, "Choose two different customers.");
+    const primary = await required<Record<string, unknown>>(
+      db,
+      "customers",
+      input.primaryId,
+    );
+    const secondary = await required<Record<string, unknown>>(
+      db,
+      "customers",
+      input.secondaryId,
+    );
+    const mergedTags = Array.from(
+      new Set([
+        ...((primary.tags as string[]) ?? []),
+        ...((secondary.tags as string[]) ?? []),
+      ]),
+    );
+    const mergedSegments = Array.from(
+      new Set([
+        ...((primary.segments as string[]) ?? []),
+        ...((secondary.segments as string[]) ?? []),
+      ]),
+    );
+    await put(db, "customers", input.primaryId, {
+      ...primary,
+      tags: mergedTags,
+      segments: mergedSegments,
+      notes: [primary.notes, secondary.notes]
+        .filter(Boolean)
+        .join("\\n--- merged ---\\n"),
+      id: input.primaryId,
+    });
+    // Reassign orders and returns to the primary customer.
+    const orders = await records<Record<string, unknown>>(db, "orders");
+    for (const order of orders) {
+      if (order.customerId === input.secondaryId) {
+        await put(db, "orders", String(order.id), {
+          ...order,
+          customerId: input.primaryId,
+        });
+      }
+    }
+    const returns = await records<Record<string, unknown>>(db, "returns");
+    for (const item of returns) {
+      if (item.customerId === input.secondaryId) {
+        await put(db, "returns", String(item.id), {
+          ...item,
+          customerId: input.primaryId,
+        });
+      }
+    }
+    const sourcing = await records<Record<string, unknown>>(db, "sourcing");
+    for (const item of sourcing) {
+      if (item.customerId === input.secondaryId) {
+        await put(
+          db,
+          "sourcing",
+          String(item.id),
+          {
+            ...item,
+            customerId: input.primaryId,
+          },
+          input.primaryId,
+        );
+      }
+    }
+    await db.query("UPDATE support_thread SET owner_id=$2 WHERE owner_id=$1", [
+      input.secondaryId,
+      input.primaryId,
+    ]);
+    await db.query(
+      "DELETE FROM commerce_record WHERE kind='customers' AND id=$1",
+      [input.secondaryId],
+    );
+    await writeAudit(db, {
+      actor: user.email,
+      action: "customers.merge",
+      record: input.primaryId,
+      capability: "customers.merge",
+      source: "admin",
+      after: { secondaryId: input.secondaryId },
+    });
+    return { merged: true };
+  }
+  if (name === "deleteCustomer") {
+    requireCapability(user, "customers.delete");
+    const id = s.id.parse(a);
+    const existing = await required<Record<string, unknown>>(
+      db,
+      "customers",
+      id,
+    );
+    const redacted = {
+      ...existing,
+      name: "Deleted customer",
+      email: `deleted+${id}@privacy.invalid`,
+      phone: "",
+      city: "",
+      state: "",
+      notes: "Profile anonymized through the privacy workflow.",
+      tags: ["privacy-erased"],
+      segments: [],
+      lifecycleStage: "inactive",
+      marketingConsent: false,
+    };
+    await put(db, "customers", id, redacted, id);
+    const orders = await records<Record<string, unknown>>(db, "orders");
+    for (const order of orders) {
+      if (order.customerId !== id) continue;
+      await put(
+        db,
+        "orders",
+        String(order.id),
+        {
+          ...order,
+          customerName: "Deleted customer",
+          customerEmail: redacted.email,
+          customerPhone: "",
+        },
+        id,
+      );
+    }
+    await db.query(
+      "UPDATE support_thread SET email=$2,subject='Privacy-redacted support request' WHERE owner_id=$1",
+      [id, redacted.email],
+    );
+    await writeAudit(db, {
+      actor: user.email,
+      action: "customers.anonymize",
+      record: id,
+      capability: "customers.delete",
+      source: "admin",
+      before: existing,
+      after: redacted,
+    });
+    return { anonymized: true };
   }
   if (name === "submitSourcing") {
     const value = s.sourcing.parse(a);
@@ -357,6 +544,21 @@ async function execute(
           "An attachment is not available to this account.",
         );
     }
+    const duplicates = await db.query(
+      `SELECT data->>'reference' AS reference
+       FROM commerce_record
+       WHERE kind=$1 AND owner_id=$2
+         AND lower(data->>'productName')=lower($3)
+         AND data->>'status' NOT IN ('converted','cancelled','declined')
+         AND updated_at > now() - interval '24 hours'
+       ORDER BY updated_at DESC LIMIT 1`,
+      [scopedRecordKind(user, "sourcing"), user.id, value.productName],
+    );
+    if (duplicates.rows[0])
+      throw new HttpError(
+        409,
+        `A similar open request (${duplicates.rows[0].reference}) was submitted in the last 24 hours. Open it instead of creating a duplicate.`,
+      );
     const requestId = randomUUID();
     const reference = `SR-${requestId.slice(0, 8).toUpperCase()}`;
     const request = {
@@ -574,9 +776,15 @@ async function execute(
     );
     return { reset: true };
   }
-  const capability = commandCapabilities[name];
-  if (!capability) throw new HttpError(400, "Unknown action.");
-  requireCapability(user, capability);
+  const vendorCommands = new Set(["saveVendorProduct", "saveVendorStock"]);
+  if (vendorCommands.has(name)) {
+    if (user.role !== "Vendor")
+      throw new HttpError(403, "Vendor portal access is required.");
+  } else {
+    const capability = commandCapabilities[name];
+    if (!capability) throw new HttpError(400, "Unknown action.");
+    requireCapability(user, capability);
+  }
   if (name === "saveShippingZone") {
     const value = z
       .object({
@@ -594,20 +802,16 @@ async function execute(
     await put(db, "shippingZones", value.id, value);
   } else if (name === "saveProduct") {
     const value = s.product.parse(a);
-    const category = await record<{
-      active?: boolean;
-      restricted: boolean;
-    }>(db, "categories", value.categorySlug);
-    if (!category || !(await record(db, "vendors", value.vendorId)))
-      throw new HttpError(400, "Select an existing category and supplier.");
     if (
-      value.status === "published" &&
-      (category.active === false || category.restricted !== value.restricted)
+      !(await record(db, "categories", value.categorySlug)) ||
+      !(await record(db, "vendors", value.vendorId))
     )
-      throw new HttpError(
-        409,
-        "A published product must match an active department's visibility.",
-      );
+      throw new HttpError(400, "Select an existing category and supplier.");
+    if (value.status === "published") {
+      const readiness = await publishReadiness(db, value);
+      if (!readiness.ready)
+        throw new HttpError(409, readiness.issues.join(" "));
+    }
     if (new Set(value.variants.map((v) => v.id)).size !== value.variants.length)
       throw new HttpError(400, "Variant IDs must be unique.");
     const allSkus = [
@@ -655,6 +859,182 @@ async function execute(
       ...value,
       updatedAt: new Date().toISOString(),
     });
+  } else if (name === "bulkProductStatus") {
+    const input = z
+      .object({
+        ids: z.array(s.id).min(1).max(200),
+        status: s.product.shape.status,
+      })
+      .parse(a);
+    for (const id of input.ids) {
+      const product = await required<Product>(db, "products", id);
+      if (input.status === "published") {
+        const readiness = await publishReadiness(db, product);
+        if (!readiness.ready)
+          throw new HttpError(
+            409,
+            product.name + ": " + readiness.issues.join(" "),
+          );
+      }
+      await put(db, "products", id, {
+        ...product,
+        status: input.status,
+        updatedAt: new Date().toISOString(),
+      });
+      await put(db, "productMeta", "schedule:" + id, {
+        id: "schedule:" + id,
+        productId: id,
+        status: "cancelled",
+      });
+    }
+    return { updated: input.ids.length };
+  } else if (name === "duplicateProduct") {
+    const source = await required<Product>(db, "products", s.id.parse(a));
+    const suffix = randomUUID().slice(0, 8).toUpperCase();
+    const slug = source.slug + "-copy-" + suffix.toLowerCase();
+    const sku = source.sku + "-COPY-" + suffix;
+    const copy = s.product.parse({
+      ...source,
+      id: randomUUID(),
+      slug,
+      sku,
+      name: source.name + " (copy)",
+      status: "draft",
+      featured: false,
+      newArrival: false,
+      rating: 0,
+      reviewCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      variants: source.variants.map((variant) => ({
+        ...variant,
+        id: randomUUID(),
+        sku: variant.sku + "-COPY-" + suffix,
+      })),
+    });
+    await put(db, "products", copy.id, copy);
+    return { id: copy.id, name: copy.name };
+  } else if (name === "bulkReassignProducts") {
+    const input = z
+      .object({
+        ids: z.array(s.id).min(1).max(200),
+        vendorId: s.id.optional(),
+        categorySlug: s.id.optional(),
+      })
+      .parse(a);
+    if (input.vendorId && !(await record(db, "vendors", input.vendorId)))
+      throw new HttpError(400, "Select an existing supplier.");
+    if (
+      input.categorySlug &&
+      !(await record(db, "categories", input.categorySlug))
+    )
+      throw new HttpError(400, "Select an existing department.");
+    for (const id of input.ids) {
+      const product = await required<Product>(db, "products", id);
+      await put(db, "products", id, {
+        ...product,
+        vendorId: input.vendorId ?? product.vendorId,
+        categorySlug: input.categorySlug ?? product.categorySlug,
+        status: "draft",
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return { updated: input.ids.length };
+  } else if (name === "importProducts") {
+    const entries = z
+      .array(
+        z.object({
+          name: s.short,
+          sku: s.short,
+          price: s.amount,
+          costPrice: s.amount,
+          categorySlug: s.id,
+          vendorId: s.id,
+          description: s.text.optional(),
+          brand: s.short.optional(),
+        }),
+      )
+      .min(1)
+      .max(200)
+      .parse(a);
+    const imported: string[] = [];
+    for (const entry of entries) {
+      if (
+        !(await record(db, "categories", entry.categorySlug)) ||
+        !(await record(db, "vendors", entry.vendorId))
+      )
+        throw new HttpError(
+          400,
+          entry.name + ": category or supplier does not exist.",
+        );
+      const suffix = randomUUID().slice(0, 6).toUpperCase();
+      const base = entry.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 120);
+      const now = new Date().toISOString();
+      const value = s.product.parse({
+        id: randomUUID(),
+        slug: (base || "product") + "-" + suffix.toLowerCase(),
+        sku: entry.sku + "-" + suffix,
+        name: entry.name,
+        categorySlug: entry.categorySlug,
+        brand: entry.brand ?? "PAYDAN",
+        images: [
+          "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=1200&q=80",
+        ],
+        description: entry.description || "Product details will be added soon.",
+        highlights: [],
+        specifications: {},
+        price: entry.price,
+        costPrice: entry.costPrice,
+        availability: "in_stock",
+        vendorId: entry.vendorId,
+        variants: [
+          {
+            id: "default-" + suffix.toLowerCase(),
+            sku: entry.sku + "-DEFAULT-" + suffix,
+            label: "Standard",
+            options: {},
+            price: entry.price,
+            availability: "in_stock",
+          },
+        ],
+        status: "draft",
+        featured: false,
+        newArrival: false,
+        restricted: false,
+        rating: 0,
+        reviewCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await put(db, "products", value.id, value);
+      imported.push(value.id);
+    }
+    return { imported: imported.length, ids: imported };
+  } else if (name === "scheduleProductPublish") {
+    const parsed = z
+      .union([
+        z.tuple([s.id, z.iso.datetime()]),
+        z.object({ id: s.id, publishAt: z.iso.datetime() }),
+      ])
+      .parse(a);
+    const input = Array.isArray(parsed)
+      ? { id: parsed[0], publishAt: parsed[1] }
+      : parsed;
+    const product = await required<Product>(db, "products", input.id);
+    if (Date.parse(input.publishAt) <= Date.now())
+      throw new HttpError(400, "Choose a future publish time.");
+    await put(db, "productMeta", "schedule:" + product.id, {
+      id: "schedule:" + product.id,
+      productId: product.id,
+      publishAt: input.publishAt,
+      status: "scheduled",
+      updatedAt: new Date().toISOString(),
+    });
+    return { scheduled: true, publishAt: input.publishAt };
   } else if (name === "saveCategory") {
     const value = s.category.parse(a);
     await put(db, "categories", value.slug, value);
@@ -670,20 +1050,17 @@ async function execute(
   } else if (name === "setProductStatus") {
     const value = await required<Product>(db, "products", a);
     const status = s.product.shape.status.parse(b);
+    if (status !== value.status) {
+      await put(db, "productMeta", "schedule:" + value.id, {
+        id: "schedule:" + value.id,
+        productId: value.id,
+        status: "cancelled",
+      });
+    }
     if (status === "published") {
-      const category = await record<{
-        active?: boolean;
-        restricted: boolean;
-      }>(db, "categories", value.categorySlug);
-      if (
-        !category ||
-        category.active === false ||
-        category.restricted !== value.restricted
-      )
-        throw new HttpError(
-          409,
-          "Move this product to an active department with matching visibility before publishing.",
-        );
+      const readiness = await publishReadiness(db, value);
+      if (!readiness.ready)
+        throw new HttpError(409, readiness.issues.join(" "));
     }
     value.status = status;
     await put(db, "products", value.id, value);
@@ -732,6 +1109,28 @@ async function execute(
           }
         : a,
     );
+    if (!prior && value.role === "Vendor")
+      throw new HttpError(
+        400,
+        "Create vendor access from the supplier record so it is scoped correctly.",
+      );
+    if (prior?.role !== "Vendor" && value.role === "Vendor")
+      throw new HttpError(
+        400,
+        "Create vendor access from the supplier record so it is scoped correctly.",
+      );
+    if (prior?.role === "Vendor") {
+      if (value.role !== "Vendor")
+        throw new HttpError(
+          400,
+          "Unlink vendor access from the supplier record before changing its role.",
+        );
+      if (value.email !== prior.email)
+        throw new HttpError(
+          400,
+          "Change the linked email from the supplier record.",
+        );
+    }
     if (
       value.email === user.email &&
       (value.role !== "Super Admin" || value.status !== "active")
@@ -748,8 +1147,228 @@ async function execute(
         eventType: "team.invited",
         recipient: value.email,
         template: "team.invite",
-        data: {},
+        data: {
+          url: new URL(
+            `/register?email=${encodeURIComponent(value.email)}`,
+            `${(process.env.BETTER_AUTH_URL || "https://paydan.store").replace(/\/+$/, "")}/`,
+          ).toString(),
+        },
       });
+  } else if (name === "createVendorAccount") {
+    const input = z
+      .object({ vendorId: s.id, name: s.short, email: z.email() })
+      .parse(a);
+    const email = input.email.toLowerCase();
+    const vendor = await record<Vendor>(db, "vendors", input.vendorId);
+    if (!vendor || vendor.status !== "active")
+      throw new HttpError(400, "Choose an active supplier.");
+    const team = await records<TeamMember>(db, "team");
+    if (team.some((member) => member.email.toLowerCase() === email))
+      throw new HttpError(409, "An access record already uses this email.");
+    if (
+      vendor.ownerTeamMemberId ||
+      team.some((member) => member.vendorId === vendor.id)
+    )
+      throw new HttpError(
+        409,
+        "This supplier already has linked portal access.",
+      );
+    const id = randomUUID();
+    const member: TeamMember = {
+      id,
+      name: input.name,
+      email,
+      role: "Vendor",
+      vendorId: vendor.id,
+      status: "invited",
+      lastActive: "",
+    };
+    await put(db, "team", id, member);
+    await put(db, "vendors", vendor.id, {
+      ...vendor,
+      ownerTeamMemberId: id,
+    });
+    const invite = await issueVendorInvite(db, member, vendor);
+    await enqueueMail(db, {
+      eventKey: invite.eventKey,
+      eventType: "vendor.invited",
+      recipient: email,
+      template: "vendor.invite",
+      data: {
+        url: invite.url,
+        message:
+          "PAYDAN has prepared vendor access for " +
+          vendor.name +
+          ". Open the secure setup link with " +
+          email +
+          ", create your password, verify your email, then sign in to the vendor portal.",
+      },
+    });
+    return { id, email };
+  } else if (name === "updateVendorAccount") {
+    const input = z
+      .object({
+        id: s.id,
+        status: s.team.shape.status.optional(),
+        email: z.email().optional(),
+        resend: z.boolean().optional(),
+      })
+      .parse(a);
+    const member = await required<TeamMember>(db, "team", input.id);
+    if (member.role !== "Vendor")
+      throw new HttpError(400, "This access record is not a vendor account.");
+    const email = input.email?.toLowerCase() ?? member.email;
+    if (email !== member.email) {
+      const team = await records<TeamMember>(db, "team");
+      if (
+        team.some(
+          (item) => item.id !== member.id && item.email.toLowerCase() === email,
+        )
+      )
+        throw new HttpError(
+          409,
+          "Another access record already uses this email.",
+        );
+    }
+    if (
+      member.status === "suspended" &&
+      (input.resend || email !== member.email)
+    )
+      throw new HttpError(
+        409,
+        "Reactivate this vendor before changing or resending access.",
+      );
+    const updated: TeamMember = {
+      ...member,
+      email,
+      status:
+        email !== member.email ? "invited" : (input.status ?? member.status),
+    };
+    await put(db, "team", updated.id, updated);
+    if (input.resend || email !== member.email) {
+      const vendor = updated.vendorId
+        ? await record<Vendor>(db, "vendors", updated.vendorId)
+        : undefined;
+      if (!vendor)
+        throw new HttpError(
+          400,
+          "This vendor account is not linked to a supplier.",
+        );
+      const invite = await issueVendorInvite(db, updated, vendor);
+      await enqueueMail(db, {
+        eventKey: invite.eventKey,
+        eventType: "vendor.invited",
+        recipient: email,
+        template: "vendor.invite",
+        data: {
+          url: invite.url,
+          message:
+            "Your PAYDAN vendor portal access was updated. Open the secure setup link for " +
+            email +
+            " to finish registration.",
+        },
+      });
+    }
+    return { id: updated.id, email };
+  } else if (name === "unlinkVendorAccount") {
+    const id = s.id.parse(a);
+    const member = await required<TeamMember>(db, "team", id);
+    if (member.role !== "Vendor")
+      throw new HttpError(400, "This access record is not a vendor account.");
+    if (member.vendorId) {
+      const vendor = await record<Vendor>(db, "vendors", member.vendorId);
+      if (vendor?.ownerTeamMemberId === member.id)
+        await put(db, "vendors", vendor.id, {
+          ...vendor,
+          ownerTeamMemberId: undefined,
+        });
+    }
+    await revokeVendorInvites(db, member.id);
+    await put(db, "team", member.id, {
+      ...member,
+      vendorId: undefined,
+      status: "suspended",
+    });
+    return { id: member.id };
+  } else if (name === "saveVendorProduct") {
+    const vendorId = requireVendor(user);
+    const product = await required<Product>(
+      db,
+      "products",
+      z.object({ id: s.id }).parse(a).id,
+    );
+    if (product.vendorId !== vendorId)
+      throw new HttpError(404, "Product not found.");
+    const patch = z
+      .object({
+        name: s.short.optional(),
+        description: s.text.optional(),
+        images: z.array(s.image).max(12).optional(),
+        imageAlts: z.record(z.string(), s.short).optional(),
+        highlights: z.array(s.short).max(20).optional(),
+        specifications: z.record(z.string(), s.short).optional(),
+      })
+      .parse(b);
+    const updated = {
+      ...product,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    await put(db, "products", product.id, updated);
+    return { id: product.id };
+  } else if (name === "saveVendorStock") {
+    const vendorId = requireVendor(user);
+    const input = z
+      .object({
+        productId: s.id,
+        variantId: s.id,
+        available: z.number().int().min(0).max(1000000),
+      })
+      .parse(a);
+    const product = await required<Product>(db, "products", input.productId);
+    if (product.vendorId !== vendorId)
+      throw new HttpError(404, "Product not found.");
+    if (!product.variants.some((variant) => variant.id === input.variantId))
+      throw new HttpError(404, "Variant not found.");
+    await db.query(
+      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
+      [input.productId, input.variantId, input.available],
+    );
+    return { saved: true };
+  } else if (name === "adjustStock") {
+    const input = z
+      .object({
+        productId: s.id,
+        variantId: s.id,
+        available: z.number().int().min(0).max(1000000),
+        reason: z.string().trim().min(3).max(200),
+      })
+      .parse(a);
+    const product = await required<Product>(db, "products", input.productId);
+    if (!product.variants.some((variant) => variant.id === input.variantId))
+      throw new HttpError(404, "Variant not found.");
+    const prior = await db.query(
+      "SELECT available FROM inventory WHERE product_id=$1 AND variant_id=$2",
+      [input.productId, input.variantId],
+    );
+    const before = Number(prior.rows[0]?.available ?? 0);
+    await db.query(
+      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
+      [input.productId, input.variantId, input.available],
+    );
+    const movement = {
+      id: randomUUID(),
+      productId: input.productId,
+      variantId: input.variantId,
+      before,
+      after: input.available,
+      delta: input.available - before,
+      reason: input.reason,
+      actor: user.email,
+      createdAt: new Date().toISOString(),
+    };
+    await put(db, "stockMovements", movement.id, movement, user.id);
+    return movement;
   } else if (name === "updateSettings") {
     const patch = z
       .object({
@@ -840,6 +1459,52 @@ async function execute(
       body: `${order.reference} is now ${order.fulfillmentStatus.replaceAll("_", " ")}.`,
       href: `/account/orders/${order.id}`,
     });
+  } else if (name === "bulkShipOrders") {
+    const input = z
+      .object({
+        ids: z.array(s.id).min(1).max(100),
+        trackingCode: z.string().trim().min(3).max(150),
+      })
+      .parse(a);
+    const transitions: Record<string, string[]> = {
+      processing: ["sourcing", "partially_packed", "dispatched"],
+      sourcing: ["processing", "partially_packed"],
+      partially_packed: ["dispatched"],
+      dispatched: ["delivered"],
+      delivered: [],
+      cancelled: [],
+    };
+    for (const id of input.ids) {
+      const order = await required<Order>(db, "orders", id);
+      if (order.paymentStatus !== "paid")
+        throw new HttpError(409, order.reference + " is not paid.");
+      if (!transitions[order.fulfillmentStatus]?.includes("dispatched"))
+        throw new HttpError(
+          409,
+          order.reference + " cannot move to dispatched.",
+        );
+      order.fulfillmentStatus = "dispatched";
+      order.trackingCode = input.trackingCode;
+      order.timeline.push({
+        label: "dispatched",
+        at: new Date().toISOString(),
+        done: true,
+        note: "Tracking " + input.trackingCode,
+      });
+      await put(db, "orders", order.id, order, order.customerId);
+      await enqueueMail(db, {
+        eventKey: "order:" + order.id + ":tracking:" + input.trackingCode,
+        eventType: "order.status_changed",
+        recipient: order.customerEmail,
+        template: "order.status",
+        data: {
+          reference: order.reference,
+          orderId: order.id,
+          status: "dispatched",
+        },
+      });
+    }
+    return { shipped: input.ids.length };
   } else if (name === "updateVendorStage") {
     const order = await required<Order>(db, "orders", a);
     const group = order.vendorGroups.find((g) => g.id === b);
@@ -857,7 +1522,7 @@ async function execute(
         409,
         "Verify payment before instructing the supplier.",
       );
-    group.stage = z
+    const nextStage = z
       .enum([
         "awaiting_assignment",
         "contact_vendor",
@@ -869,9 +1534,72 @@ async function execute(
         "closed",
       ])
       .parse(c);
-    group.notes = s.text.parse(d ?? group.notes);
+    const details =
+      typeof d === "string"
+        ? { notes: s.text.parse(d) }
+        : z
+            .object({
+              notes: s.text.optional(),
+              assignee: s.text.optional(),
+              eta: s.text.optional(),
+              purchaseOrderRef: s.text.optional(),
+              evidenceUrls: z.array(s.image).max(20).optional(),
+              stageReason: s.text.optional(),
+              urgent: z.boolean().optional(),
+            })
+            .parse(d ?? {});
+    const priorStage = group.stage;
+    group.stage = nextStage;
+    Object.assign(group, details);
+    if (nextStage !== priorStage && !details.stageReason)
+      group.stageReason = `Stage changed from ${priorStage.replaceAll("_", " ")} to ${nextStage.replaceAll("_", " ")}.`;
     group.updatedAt = new Date().toISOString();
     await put(db, "orders", order.id, order, order.customerId);
+  } else if (name === "bulkUpdateVendorStages") {
+    const input = z
+      .object({
+        groups: z
+          .array(z.object({ orderId: s.id, groupId: s.id }))
+          .min(1)
+          .max(100),
+        stage: z.enum([
+          "awaiting_assignment",
+          "contact_vendor",
+          "awaiting_confirmation",
+          "ordered_from_supplier",
+          "supplier_fulfilled",
+          "ready_for_dispatch",
+          "blocked",
+          "closed",
+        ]),
+        reason: s.short,
+      })
+      .parse(a);
+    for (const target of input.groups) {
+      const order = await required<Order>(db, "orders", target.orderId);
+      const group = order.vendorGroups.find(
+        (item) => item.id === target.groupId,
+      );
+      if (!group) throw new HttpError(404, "Supplier group not found.");
+      if (
+        [
+          "ordered_from_supplier",
+          "supplier_fulfilled",
+          "ready_for_dispatch",
+          "closed",
+        ].includes(input.stage) &&
+        order.paymentStatus !== "paid"
+      )
+        throw new HttpError(
+          409,
+          `Verify payment on ${order.reference} before moving its supplier work.`,
+        );
+      group.stage = input.stage;
+      group.stageReason = input.reason;
+      group.updatedAt = new Date().toISOString();
+      await put(db, "orders", order.id, order, order.customerId);
+    }
+    return { updated: input.groups.length };
   } else if (name === "updateReturn") {
     const value = await required<ReturnRequest>(db, "returns", a);
     const patch = z
@@ -914,6 +1642,12 @@ async function execute(
           0,
         ),
       );
+      if (request.quote) {
+        request.quoteHistory = [
+          ...(request.quoteHistory ?? []),
+          structuredClone(request.quote),
+        ].slice(-20);
+      }
       request.quote = value as Quote;
       request.status = "quote_ready";
     }
@@ -924,6 +1658,11 @@ async function execute(
         Date.parse(request.quote.validUntil) <= Date.now()
       )
         throw new HttpError(409, "Save a valid draft quote first.");
+      if (request.quote.total > 1_000_000 && user.role !== "Super Admin")
+        throw new HttpError(
+          403,
+          "Quotes above NGN 1,000,000 require a Super Admin to send them.",
+        );
       request.quote.status = "sent";
       request.quote.sentAt = new Date().toISOString();
       request.status = "awaiting_customer";

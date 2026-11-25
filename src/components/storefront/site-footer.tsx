@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useDemo } from "@/lib/store";
@@ -17,6 +17,7 @@ const companyLinks = [
   { href: "/request-product", label: "Request a product" },
   { href: "/categories", label: "All departments" },
   { href: "/account", label: "Your account" },
+  { href: "/vendor/login", label: "Vendor login" },
   { href: "/policies/privacy", label: "Privacy" },
   { href: "/policies/terms", label: "Terms of use" },
 ];

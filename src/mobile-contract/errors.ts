@@ -37,10 +37,7 @@ export const mobileErrorSchema = z.object({
 export type MobileError = z.infer<typeof mobileErrorSchema>;
 
 /** Map an HTTP status + server message to a stable mobile error code. */
-export function toMobileError(
-  status: number,
-  message: string,
-): MobileError {
+export function toMobileError(status: number, message: string): MobileError {
   const safe = message.slice(0, 500) || "Something went wrong.";
   if (status === 401)
     return {

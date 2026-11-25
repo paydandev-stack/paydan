@@ -1,5 +1,9 @@
 import { database } from "@/server/db";
-import { mobileFailure, mobilePublicJson, mobileViewer } from "@/server/mobile-http";
+import {
+  mobileFailure,
+  mobilePublicJson,
+  mobileViewer,
+} from "@/server/mobile-http";
 
 export const runtime = "nodejs";
 
@@ -30,8 +34,7 @@ export async function GET(request: Request) {
           googleSignInEnabled: Boolean(
             process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
           ),
-          supportEmail:
-            process.env.SUPPORT_EMAIL || "support@paydan.store",
+          supportEmail: process.env.SUPPORT_EMAIL || "support@paydan.store",
         },
         flags: {
           assistantEnabled: true,

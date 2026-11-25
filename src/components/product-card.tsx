@@ -24,9 +24,9 @@ type ProductCardProps = {
 /**
  * Storefront product tile.
  *
- * The card never receives `costPrice`/`vendorId` (the DTOs do not carry them),
- * and it only renders a price when the DTO was built for a signed-in viewer
- * *and* the surface allows one. Guests get a sign-in action instead.
+ * The card never receives `costPrice`/`vendorId` (the DTOs do not carry them).
+ * It receives only the public vendor display name and renders a price when the
+ * DTO was built for a signed-in viewer and the surface allows one.
  */
 export function ProductCard({
   product,
@@ -50,11 +50,23 @@ export function ProductCard({
   return (
     <article className="product-card">
       <div className="product-image">
-        {canShowPrice && discount ? (
-          <span className="tag">-{discount}%</span>
+        {product.vendorName || (canShowPrice && discount) ? (
+          <div className="product-tags">
+            {product.vendorName ? (
+              <span
+                className="vendor-tag"
+                title={`Vendor: ${product.vendorName}`}
+              >
+                {product.vendorName}
+              </span>
+            ) : null}
+            {canShowPrice && discount ? (
+              <span className="tag">-{discount}%</span>
+            ) : null}
+          </div>
         ) : null}
         <Image
-          src={product.images[0]}
+          src={product.images[0] || "/image-placeholder.svg"}
           alt={product.name}
           fill
           sizes="(max-width: 600px) 45vw, (max-width: 900px) 30vw, 240px"

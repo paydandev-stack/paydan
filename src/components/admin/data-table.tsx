@@ -109,18 +109,24 @@ export function AdminSelect({
 export function AdminTextField({
   label,
   hint,
+  error,
   wide,
   ...rest
 }: {
   label: string;
   hint?: string;
+  error?: string;
   wide?: boolean;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, "className">) {
   return (
     <label className={`admin-field${wide ? " wide" : ""}`}>
       {label}
       <input className="admin-input" {...rest} />
-      {hint ? <small>{hint}</small> : null}
+      {error ? (
+        <small className="admin-field-error">{error}</small>
+      ) : hint ? (
+        <small>{hint}</small>
+      ) : null}
     </label>
   );
 }
@@ -128,18 +134,24 @@ export function AdminTextField({
 export function AdminTextArea({
   label,
   hint,
+  error,
   wide,
   ...rest
 }: {
   label: string;
   hint?: string;
+  error?: string;
   wide?: boolean;
 } & Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className">) {
   return (
     <label className={`admin-field${wide ? " wide" : ""}`}>
       {label}
       <textarea className="admin-textarea" {...rest} />
-      {hint ? <small>{hint}</small> : null}
+      {error ? (
+        <small className="admin-field-error">{error}</small>
+      ) : hint ? (
+        <small>{hint}</small>
+      ) : null}
     </label>
   );
 }

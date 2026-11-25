@@ -104,17 +104,66 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
       "vouchers",
       input.voucherCode.toUpperCase(),
     );
-    if (!voucher || !voucher.active || subtotal < kobo(voucher.minimum))
+    const now = Date.now();
+    if (
+      !voucher ||
+      !voucher.active ||
+      (voucher.startAt && Date.parse(voucher.startAt) > now) ||
+      (voucher.endAt && Date.parse(voucher.endAt) < now) ||
+      (voucher.usageLimit !== undefined &&
+        (voucher.usageCount ?? 0) >= voucher.usageLimit) ||
+      subtotal < kobo(voucher.minimum)
+    )
       throw new HttpError(
         400,
         "This promotion is unavailable or the minimum spend has not been reached.",
       );
+    if (voucher.perCustomerLimit !== undefined) {
+      const priorUses = await db.query(
+        `SELECT count(*)::int AS count FROM commerce_record
+         WHERE kind='orders' AND owner_id=$1
+           AND data->>'voucherCode'=$2
+           AND data->>'paymentStatus' IN ('paid','refunded')`,
+        [user.id, voucher.code],
+      );
+      if (Number(priorUses.rows[0]?.count ?? 0) >= voucher.perCustomerLimit)
+        throw new HttpError(
+          400,
+          "You have reached the usage limit for this promotion.",
+        );
+    }
+    const eligibleSubtotal = items.reduce((sum, item) => {
+      if (
+        voucher.categorySlugs?.length &&
+        !voucher.categorySlugs.includes(item.categorySlug)
+      )
+        return sum;
+      if (
+        voucher.productIds?.length &&
+        !voucher.productIds.includes(item.productId)
+      )
+        return sum;
+      return sum + kobo(item.unitPrice) * item.quantity;
+    }, 0);
+    if (eligibleSubtotal <= 0)
+      throw new HttpError(
+        400,
+        "This promotion does not apply to the items in your cart.",
+      );
     discount = Math.min(
-      subtotal,
+      eligibleSubtotal,
       voucher.type === "percent"
-        ? Math.floor((subtotal * voucher.value) / 100)
+        ? Math.floor((eligibleSubtotal * voucher.value) / 100)
         : kobo(voucher.value),
     );
+    if (
+      voucher.budgetCap !== undefined &&
+      kobo(voucher.discountUsed ?? 0) + discount > kobo(voucher.budgetCap)
+    )
+      throw new HttpError(
+        400,
+        "This promotion has reached its discount budget.",
+      );
   }
   const deliveryFee = kobo(zone.fee);
   const total = subtotal + deliveryFee - discount;
@@ -207,6 +256,9 @@ export async function initialize(
       subtotal: quote.subtotal,
       deliveryFee: quote.deliveryFee,
       discount: quote.discount,
+      voucherCode: input.voucherCode
+        ? input.voucherCode.toUpperCase()
+        : undefined,
       total: quote.total,
       address: { ...input.address, id: randomUUID(), isDefault: false },
       vendorGroups: Object.entries(groups).map(([vendorId, items]) => ({
@@ -280,15 +332,19 @@ export async function resumePayment(
   );
   const payment = result.rows[0];
   if (!payment) throw new HttpError(404, "Payment not found.");
- if (payment.status === "paid")
- return { orderId, reference: payment.reference, status: "paid" };
+  if (payment.status === "paid")
+    return { orderId, reference: payment.reference, status: "paid" };
   if (payment.status !== "pending")
     throw new HttpError(
       409,
       "This payment attempt is closed. Review your cart and start a new checkout.",
     );
- if (payment.authorization_url)
- return { orderId, reference: payment.reference, url: payment.authorization_url };
+  if (payment.authorization_url)
+    return {
+      orderId,
+      reference: payment.reference,
+      url: payment.authorization_url,
+    };
   const data = await paystack("/transaction/initialize", "POST", {
     email: payment.email,
     amount: Number(payment.amount_kobo),
@@ -305,7 +361,7 @@ export async function resumePayment(
     "UPDATE payment SET authorization_url=$2 WHERE reference=$1",
     [payment.reference, url.href],
   );
- return { orderId, reference: payment.reference, url: url.href };
+  return { orderId, reference: payment.reference, url: url.href };
 }
 export function validSignature(
   raw: string,
@@ -408,6 +464,16 @@ export async function verifyPayment(reference: string, user?: Viewer) {
       done: true,
     });
     await put(db, "orders", order.id, order, order.customerId);
+    if (order.voucherCode) {
+      const voucher = await record<Voucher>(db, "vouchers", order.voucherCode);
+      if (voucher) {
+        await put(db, "vouchers", voucher.code, {
+          ...voucher,
+          usageCount: (voucher.usageCount ?? 0) + 1,
+          discountUsed: (voucher.discountUsed ?? 0) + order.discount,
+        });
+      }
+    }
     await db.query(
       "UPDATE payment SET status='paid',provider_id=$2,paid_at=now() WHERE reference=$1",
       [reference, String(data.id)],

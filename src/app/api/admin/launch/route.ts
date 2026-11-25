@@ -2,6 +2,36 @@ import { database, record } from "@/server/db";
 import { failure, json, requireCapability, viewer } from "@/server/http";
 import type { StoreSettings } from "@/lib/types";
 import { POLICY_CONTENT_VERSION, policyPages } from "@/data/content";
+import { mediaCdnBase } from "@/lib/media-origin";
+
+function validMediaOrigin() {
+  try {
+    return Boolean(
+      mediaCdnBase(process.env.MEDIA_CDN_URL) || process.env.CLOUDFRONT_DOMAIN,
+    );
+  } catch {
+    return false;
+  }
+}
+
+const CHECK_META: Record<string, { owner: string; href: string }> = {
+  supplier: { owner: "Procurement", href: "/admin/vendors" },
+  product: { owner: "Catalogue", href: "/admin/products" },
+  inventory: { owner: "Catalogue", href: "/admin/inventory" },
+  shipping: { owner: "Operations", href: "/admin/settings/shipping" },
+  support: { owner: "Support", href: "/admin/settings/storefront" },
+  banner: { owner: "Catalogue", href: "/admin/promotions/banners" },
+  policies: { owner: "Leadership", href: "/admin/settings" },
+  google: { owner: "Engineering", href: "/admin/settings/payments" },
+  storage: { owner: "Engineering", href: "/admin/settings/payments" },
+  paystack: { owner: "Finance", href: "/admin/settings/payments" },
+  email: { owner: "Engineering", href: "/admin/settings/payments" },
+  "mail-worker": { owner: "Operations", href: "/admin/operations" },
+  "payment-worker": { owner: "Finance", href: "/admin/operations" },
+  ai: { owner: "Product", href: "/admin/settings/payments" },
+  alerts: { owner: "Operations", href: "/admin/operations" },
+  indexing: { owner: "Leadership", href: "/admin/settings" },
+};
 
 export async function GET(request: Request) {
   try {
@@ -120,7 +150,7 @@ export async function GET(request: Request) {
         ok: Boolean(
           process.env.S3_BUCKET &&
           process.env.AWS_REGION &&
-          (process.env.MEDIA_CDN_URL || process.env.CLOUDFRONT_DOMAIN) &&
+          validMediaOrigin() &&
           process.env.STORAGE_ACCEPTED_AT,
         ),
         detail:
@@ -195,7 +225,8 @@ export async function GET(request: Request) {
       },
     ];
     return json({
-      items,
+      checkedAt: new Date().toISOString(),
+      items: items.map((item) => ({ ...item, ...CHECK_META[item.key] })),
       ready: items
         .filter((item) => item.blocking !== false)
         .every((item) => item.ok),
@@ -204,3 +235,5 @@ export async function GET(request: Request) {
     return failure(error);
   }
 }
+
+export const POST = GET;

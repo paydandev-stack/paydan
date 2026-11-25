@@ -131,12 +131,14 @@ export default function AdminNewVendorPage() {
     paymentTerms: "",
     notes: "",
   });
+  const [saving, setSaving] = useState(false);
   function set<K extends keyof VendorForm>(key: K, value: VendorForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     try {
       event.preventDefault();
+      if (saving) return;
       const name = form.name.trim();
       const contactName = form.contactName.trim();
       const email = form.email.trim();
@@ -184,12 +186,20 @@ export default function AdminNewVendorPage() {
         reliability: 0,
         createdAt: new Date().toISOString(),
       };
+      setSaving(true);
       await actions.saveVendor(vendor);
       actions.notify(
         `${vendor.name} added to the vendor network — reliability starts at 0/100.`,
       );
       router.push(`/admin/vendors/${id}`);
-    } catch (error) {}
+    } catch (cause) {
+      actions.notify(
+        cause instanceof Error ? cause.message : "Could not save this vendor.",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <>
@@ -310,9 +320,11 @@ export default function AdminNewVendorPage() {
         </div>
 
         <div className="form-actions">
-          <Link href="/admin/vendors">Cancel</Link>
-          <button type="submit" className="primary">
-            Save vendor
+          <Link className="admin-btn quiet" href="/admin/vendors">
+            Cancel
+          </Link>
+          <button type="submit" className="admin-btn primary" disabled={saving}>
+            {saving ? "Saving…" : "Save vendor"}
           </button>
         </div>
       </form>

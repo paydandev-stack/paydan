@@ -8,8 +8,8 @@ import type { Product, ProductVariant } from "@/lib/types";
  * markup, prefetch payloads, JSON-LD or the assistant's retrieval.
  *
  * Every shape here is built with an explicit field allowlist. `costPrice`,
- * `vendorId` and supplier relationships never appear in either DTO — those are
- * internal fields that must not reach any customer bundle.
+ * `vendorId` and private supplier details never appear in either DTO. The
+ * customer-safe `vendorName` label is added by server catalogue queries.
  */
 
 type Monetary = {
@@ -44,6 +44,7 @@ export type CatalogProduct = {
   name: string;
   categorySlug: string;
   brand: string;
+  vendorName?: string;
   images: string[];
   description: string;
   highlights: string[];
@@ -87,6 +88,7 @@ const productShape = (product: Product, priced: boolean): CatalogProduct => ({
   name: product.name,
   categorySlug: product.categorySlug,
   brand: product.brand,
+  ...(product.vendorName ? { vendorName: product.vendorName } : {}),
   images: product.images,
   description: product.description,
   highlights: product.highlights,
@@ -119,8 +121,8 @@ export function toPublicProducts(products: Product[]): CatalogProduct[] {
 }
 
 /**
- * Signed-in member: current prices are allowed, but internal cost and supplier
- * fields stay out of the object even for a member DTO.
+ * Signed-in member: current prices are allowed, but internal cost and vendor
+ * identifiers stay out of the object even for a member DTO.
  */
 export function toMemberProduct(product: Product): CatalogProduct {
   return productShape(product, true);

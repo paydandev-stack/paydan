@@ -11,11 +11,20 @@ export async function GET(request: Request) {
       .datetime()
       .optional()
       .parse(url.searchParams.get("cursor") || undefined);
-    const action = z
+    const filter = z.string().trim().max(150).optional();
+    const action = filter.parse(url.searchParams.get("action") || undefined);
+    const actor = filter.parse(url.searchParams.get("actor") || undefined);
+    const capability = filter.parse(
+      url.searchParams.get("capability") || undefined,
+    );
+    const source = filter.parse(url.searchParams.get("source") || undefined);
+    const record = filter.parse(url.searchParams.get("record") || undefined);
+    const date = z
       .string()
-      .max(80)
-      .optional()
-      .parse(url.searchParams.get("action") || undefined);
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional();
+    const from = date.parse(url.searchParams.get("from") || undefined);
+    const to = date.parse(url.searchParams.get("to") || undefined);
     const format = z
       .enum(["json", "csv"])
       .default("json")
@@ -25,8 +34,24 @@ export async function GET(request: Request) {
        WHERE kind='audit'
          AND ($1::timestamptz IS NULL OR updated_at < $1)
          AND ($2::text IS NULL OR data->>'action' ILIKE '%' || $2 || '%')
-       ORDER BY updated_at DESC LIMIT $3`,
-      [cursor ?? null, action ?? null, format === "csv" ? 5000 : 51],
+         AND ($3::text IS NULL OR data->>'actor' ILIKE '%' || $3 || '%')
+         AND ($4::text IS NULL OR data->>'capability'=$4)
+         AND ($5::text IS NULL OR data->>'source'=$5)
+         AND ($6::text IS NULL OR data->>'record'=$6)
+         AND ($7::date IS NULL OR updated_at >= $7::date)
+         AND ($8::date IS NULL OR updated_at < $8::date + interval '1 day')
+       ORDER BY updated_at DESC LIMIT $9`,
+      [
+        cursor ?? null,
+        action ?? null,
+        actor ?? null,
+        capability ?? null,
+        source ?? null,
+        record ?? null,
+        from ?? null,
+        to ?? null,
+        format === "csv" ? 50000 : 51,
+      ],
     );
     if (format === "csv") {
       const cell = (value: unknown) => {
@@ -46,19 +71,27 @@ export async function GET(request: Request) {
           .map(cell)
           .join(","),
       );
-      return new Response(
-        ["timestamp,actor,capability,action,record,source", ...rows].join(
-          "\r\n",
-        ),
-        {
-          headers: {
-            "Cache-Control": "private, no-store",
-            "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="paydan-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
-            "X-Content-Type-Options": "nosniff",
-          },
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              "timestamp,actor,capability,action,record,source\r\n",
+            ),
+          );
+          for (const row of rows)
+            controller.enqueue(encoder.encode(row + "\r\n"));
+          controller.close();
         },
-      );
+      });
+      return new Response(stream, {
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="paydan-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
     }
     const hasMore = result.rows.length > 50;
     const rows = result.rows.slice(0, 50);

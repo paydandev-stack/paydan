@@ -27,7 +27,13 @@ export async function PUT(request: Request) {
 VALUES($1,$2,$3,$4,$5)
 ON CONFLICT(owner_id,device_id,app_environment)
 DO UPDATE SET token=excluded.token,platform=excluded.platform,updated_at=now()`,
-      [user.id, input.deviceId, input.platform, input.appEnvironment, input.token],
+      [
+        user.id,
+        input.deviceId,
+        input.platform,
+        input.appEnvironment,
+        input.token,
+      ],
     );
     return mobileJson({ registered: true });
   } catch (error) {

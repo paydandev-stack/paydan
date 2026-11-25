@@ -28,6 +28,35 @@ const MONTH_LABELS = [
 const monthLabel = (bucket: string) =>
   `${MONTH_LABELS[Number(bucket.slice(5, 7)) - 1]} ’${bucket.slice(2, 4)}`;
 
+type ServerMetrics = {
+  processedRefunds: number;
+  processedRefundCount: number;
+  pendingRefundCount: number;
+  paidRevenue: number;
+  paidOrderCount: number;
+  costOfGoods: number;
+  grossMargin: number;
+  grossMarginRate: number;
+  paymentSuccessRate: number;
+  paymentAttempts: number;
+  stockouts: number;
+  newCustomers: number;
+  returningCustomers: number;
+  comparisonRevenuePct: number | null;
+  topProducts: Array<{
+    id: string;
+    name: string;
+    units: number;
+    revenue: number;
+  }>;
+  cohorts: Array<{
+    cohort: string;
+    customers: number;
+    revenue: number;
+    ltv: number;
+  }>;
+};
+
 /** Fulfilment rows: tone class per status, green is the stylesheet default. */
 const FULFILMENT_ROWS: { status: FulfillmentStatus; tone: string }[] = [
   { status: "awaiting_payment", tone: "orange" },
@@ -44,16 +73,29 @@ export default function AdminAnalyticsPage() {
   const { state } = useDemo();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [refunds, setRefunds] = useState({
+  const [refunds, setRefunds] = useState<ServerMetrics>({
     processedRefunds: 0,
     processedRefundCount: 0,
     pendingRefundCount: 0,
+    paidRevenue: 0,
+    paidOrderCount: 0,
+    costOfGoods: 0,
+    grossMargin: 0,
+    grossMarginRate: 0,
+    paymentSuccessRate: 0,
+    paymentAttempts: 0,
+    stockouts: 0,
+    newCustomers: 0,
+    returningCustomers: 0,
+    comparisonRevenuePct: null,
+    topProducts: [],
+    cohorts: [],
   });
   useEffect(() => {
     const query = new URLSearchParams();
     if (from) query.set("from", from);
     if (to) query.set("to", to);
-    void api<typeof refunds>(`/api/admin/analytics?${query}`).then(setRefunds);
+    void api<ServerMetrics>(`/api/admin/analytics?${query}`).then(setRefunds);
   }, [from, to]);
 
   const inPeriod = (value: string) => {
@@ -196,9 +238,17 @@ export default function AdminAnalyticsPage() {
           "sourcing request",
         )} — every figure below is computed from those records`}
         action={
-          <Link className="admin-btn quiet" href="/admin">
-            Dashboard
-          </Link>
+          <>
+            <a
+              className="admin-btn secondary"
+              href={`/api/admin/analytics?format=csv${from ? `&from=${from}` : ""}${to ? `&to=${to}` : ""}`}
+            >
+              Export report
+            </a>
+            <Link className="admin-btn quiet" href="/admin">
+              Dashboard
+            </Link>
+          </>
         }
       />
 
@@ -281,6 +331,29 @@ export default function AdminAnalyticsPage() {
               Math.round(paidRevenue / (state.customers.length || 1)),
             ),
             note: "Paid revenue ÷ customers",
+          },
+          {
+            label: "Gross margin",
+            value: money(refunds.grossMargin),
+            note: `${refunds.grossMarginRate}% after product cost`,
+          },
+          {
+            label: "Payment success",
+            value: `${refunds.paymentSuccessRate}%`,
+            note: `${refunds.paymentAttempts} payment attempts`,
+          },
+          {
+            label: "Stockouts",
+            value: refunds.stockouts,
+            note: "Variants with zero confirmed stock",
+          },
+          {
+            label: "New / returning",
+            value: `${refunds.newCustomers} / ${refunds.returningCustomers}`,
+            note:
+              refunds.comparisonRevenuePct === null
+                ? "Choose both dates for period comparison"
+                : `${refunds.comparisonRevenuePct >= 0 ? "+" : ""}${refunds.comparisonRevenuePct}% revenue vs prior period`,
           },
         ]}
       />
@@ -422,6 +495,57 @@ export default function AdminAnalyticsPage() {
                 </div>
               ))}
             </AdminTable>
+          )}
+        </section>
+      </div>
+
+      <div className="admin-panels" style={{ marginTop: "1rem" }}>
+        <section className="admin-card">
+          <h3>Product performance</h3>
+          {refunds.topProducts.length ? (
+            <AdminTable
+              template="1.5fr .7fr 1fr"
+              head={["Product", "Units", "Revenue"]}
+              caption="Top products by paid revenue in the selected period"
+            >
+              {refunds.topProducts.map((product) => (
+                <div className="table-row" key={product.id}>
+                  <span>{product.name}</span>
+                  <span>{product.units}</span>
+                  <span>{money(product.revenue)}</span>
+                </div>
+              ))}
+            </AdminTable>
+          ) : (
+            <AdminEmpty
+              title="No product performance yet"
+              hint="Paid product lines will appear here."
+            />
+          )}
+        </section>
+
+        <section className="admin-card">
+          <h3>Customer cohorts and LTV</h3>
+          {refunds.cohorts.length ? (
+            <AdminTable
+              template=".8fr .8fr 1fr 1fr"
+              head={["Joined", "Customers", "Revenue", "LTV"]}
+              caption="Selected-period paid revenue grouped by customer join month"
+            >
+              {refunds.cohorts.map((cohort) => (
+                <div className="table-row" key={cohort.cohort}>
+                  <span>{cohort.cohort}</span>
+                  <span>{cohort.customers}</span>
+                  <span>{money(cohort.revenue)}</span>
+                  <span>{money(cohort.ltv)}</span>
+                </div>
+              ))}
+            </AdminTable>
+          ) : (
+            <AdminEmpty
+              title="No cohort data yet"
+              hint="Cohorts appear after customers have paid orders."
+            />
           )}
         </section>
       </div>

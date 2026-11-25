@@ -398,6 +398,35 @@ export default function AdminSourcingRequestPage() {
               </div>
             </div>
             <p>{request.description}</p>
+            {request.images.length ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                  gap: ".75rem",
+                  marginTop: "1rem",
+                }}
+              >
+                {request.images.map((url, index) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer">
+                    {/* Customer uploads can be authenticated /api/media URLs. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`Reference attachment ${index + 1}`}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        aspectRatio: "1",
+                        objectFit: "cover",
+                        borderRadius: ".7rem",
+                        border: "1px solid var(--border)",
+                      }}
+                    />
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section className="admin-card">
@@ -526,6 +555,13 @@ export default function AdminSourcingRequestPage() {
               </div>
             </div>
 
+            {total > 1_000_000 ? (
+              <div className="admin-note" style={{ marginTop: ".9rem" }}>
+                This quote exceeds NGN 1,000,000. A Super Admin must send it
+                after reviewing the draft.
+              </div>
+            ) : null}
+
             {builderHint ? (
               <div
                 className={canSend ? "admin-notice" : "admin-note"}
@@ -557,6 +593,26 @@ export default function AdminSourcingRequestPage() {
               </button>
             </div>
           </section>
+
+          {request.quoteHistory?.length ? (
+            <section className="admin-card">
+              <h3>Quote version history</h3>
+              <p>Previous saved versions are retained for review.</p>
+              {[...request.quoteHistory].reverse().map((version, index) => (
+                <div className="queue-item" key={`${version.id}-${index}`}>
+                  <span>
+                    <strong>{money(version.total)}</strong>
+                    <br />
+                    {plural(version.lines.length, "line")} · valid until{" "}
+                    {formatDate(version.validUntil)}
+                  </span>
+                  <StatusPill tone={quoteStatusMeta[version.status].tone}>
+                    {quoteStatusMeta[version.status].label}
+                  </StatusPill>
+                </div>
+              ))}
+            </section>
+          ) : null}
         </div>
 
         <div style={{ display: "grid", gap: "1rem" }}>

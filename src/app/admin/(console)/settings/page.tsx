@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import { formatDateTime, plural } from "@/lib/format";
@@ -41,8 +40,7 @@ function SettingsLink({
 
 /** Store configuration hub: entry points to each settings screen plus a read-only summary. */
 export default function AdminSettingsPage() {
-  const { state, actions } = useDemo();
-  const [confirmReset, setConfirmReset] = useState(false);
+  const { state } = useDemo();
 
   const settings = state.settings;
   const zones = state.shippingZones;
@@ -53,12 +51,6 @@ export default function AdminSettingsPage() {
     settings.announcement.length > 54
       ? `${settings.announcement.slice(0, 54)}…`
       : settings.announcement;
-
-  function handleReset() {
-    actions.resetDemo();
-    actions.notify("Demo data reset");
-    setConfirmReset(false);
-  }
 
   return (
     <>
@@ -94,6 +86,12 @@ export default function AdminSettingsPage() {
           title="Storefront"
           summary={`${settings.storeName} · ${announcementSummary}`}
           hint="Store name, support contact details, business hours and the header announcement."
+        />
+        <SettingsLink
+          href="/admin/settings/advanced"
+          title="Advanced"
+          summary="Tax, templates, policies, retention and webhooks"
+          hint="Business controls and integration records used for release operations."
         />
       </div>
 

@@ -21,7 +21,11 @@ export async function GET(
   try {
     const user = await mobileViewer(request);
     requireMobileUser(user);
-    const id = z.string().min(1).max(150).parse((await context.params).id);
+    const id = z
+      .string()
+      .min(1)
+      .max(150)
+      .parse((await context.params).id);
     const order = await record<Order>(
       database(),
       scopedRecordKind(user, "orders"),

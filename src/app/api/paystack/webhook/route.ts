@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { database } from "@/server/db";
+import { database, put } from "@/server/db";
 import { failure, json } from "@/server/http";
 import { validSignature, verifyPayment } from "@/server/payments";
 import { verifyRefund } from "@/server/refunds";
@@ -33,6 +33,12 @@ export async function POST(request: Request) {
       "INSERT INTO webhook_event(digest,event) VALUES($1,$2) ON CONFLICT DO NOTHING",
       [digest, String(event.event)],
     );
+    await put(database(), "webhookStatus", "paystack", {
+      id: "paystack",
+      status: "verified",
+      lastEventType: String(event.event),
+      lastEventAt: new Date().toISOString(),
+    });
     return json({ received: true });
   } catch (error) {
     return failure(error);

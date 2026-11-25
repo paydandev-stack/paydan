@@ -1,19 +1,7 @@
 import type { NextConfig } from "next";
+import { mediaCdnBase } from "./src/lib/media-origin";
 
-const mediaCdn = process.env.MEDIA_CDN_URL
-  ? new URL(process.env.MEDIA_CDN_URL)
-  : null;
-if (
-  mediaCdn &&
-  (mediaCdn.protocol !== "https:" ||
-    mediaCdn.username ||
-    mediaCdn.password ||
-    mediaCdn.search ||
-    mediaCdn.hash)
-)
-  throw new Error(
-    "MEDIA_CDN_URL must be a public HTTPS origin without credentials, a query, or a fragment.",
-  );
+const mediaCdn = mediaCdnBase(process.env.MEDIA_CDN_URL);
 const mediaCdnPath = mediaCdn
   ? `${mediaCdn.pathname.replace(/\/+$/, "")}/catalog/**`
   : null;

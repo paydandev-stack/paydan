@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api-client";
 import { useDemo } from "@/lib/store";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -11,8 +12,8 @@ import {
   AdminTextField,
 } from "@/components/admin/data-table";
 import { StatusPill } from "@/components/status-pill";
-import type { Address, Customer } from "@/lib/types";
-import { formatDate, money, plural } from "@/lib/format";
+import type { Address, AuditEntry, Customer } from "@/lib/types";
+import { formatDate, formatDateTime, money, plural } from "@/lib/format";
 import {
   fulfillmentStatusMeta,
   paymentStatusMeta,
@@ -22,34 +23,50 @@ import {
 import { hasCapability } from "@/lib/capabilities";
 type ProfilePatch = Pick<
   Customer,
-  "name" | "email" | "phone" | "city" | "state" | "notes"
+  | "name"
+  | "phone"
+  | "city"
+  | "state"
+  | "notes"
+  | "tags"
+  | "segments"
+  | "lifecycleStage"
+  | "marketingConsent"
 >;
 /** Editable contact details; segments stay read-only (see note in the form). */
 function ProfileForm({
   customer,
   onSave,
   canEditNotes,
+  canManage,
 }: {
   customer: Customer;
   onSave: (patch: ProfilePatch) => void;
   canEditNotes: boolean;
+  canManage: boolean;
 }) {
   const [form, setForm] = useState<ProfilePatch>({
     name: customer.name,
-    email: customer.email,
     phone: customer.phone,
     city: customer.city,
     state: customer.state,
     notes: customer.notes,
+    tags: customer.tags ?? [],
+    segments: customer.segments ?? [],
+    lifecycleStage: customer.lifecycleStage ?? "new",
+    marketingConsent: customer.marketingConsent ?? false,
   });
   const reset = () =>
     setForm({
       name: customer.name,
-      email: customer.email,
       phone: customer.phone,
       city: customer.city,
       state: customer.state,
       notes: customer.notes,
+      tags: customer.tags ?? [],
+      segments: customer.segments ?? [],
+      lifecycleStage: customer.lifecycleStage ?? "new",
+      marketingConsent: customer.marketingConsent ?? false,
     });
   return (
     <form
@@ -63,48 +80,105 @@ function ProfileForm({
         label="Name"
         required
         value={form.name}
-        readOnly
+        readOnly={!canManage}
         onChange={(event) => setForm({ ...form, name: event.target.value })}
       />
       <AdminTextField
         label="Email"
         type="email"
         required
-        value={form.email}
+        value={customer.email}
         readOnly
-        onChange={(event) => setForm({ ...form, email: event.target.value })}
+        hint="Login email changes require a verified account workflow."
       />
       <AdminTextField
         label="Phone"
         value={form.phone}
-        readOnly
+        readOnly={!canManage}
         onChange={(event) => setForm({ ...form, phone: event.target.value })}
       />
       <AdminTextField
         label="City"
         value={form.city}
-        readOnly
+        readOnly={!canManage}
         onChange={(event) => setForm({ ...form, city: event.target.value })}
       />
       <AdminTextField
         label="State"
         value={form.state}
-        readOnly
+        readOnly={!canManage}
         onChange={(event) => setForm({ ...form, state: event.target.value })}
       />
-      <div className="admin-field">
-        <span>Segments (read-only)</span>
-        <div className="admin-chips">
-          {customer.segments.map((item) => (
-            <span className="admin-chip active" key={item}>
-              {item}
-            </span>
+      <AdminTextField
+        label="Tags"
+        value={form.tags.join(", ")}
+        readOnly={!canManage}
+        hint="Comma-separated operational labels."
+        onChange={(event) =>
+          setForm({
+            ...form,
+            tags: event.target.value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+          })
+        }
+      />
+      <AdminTextField
+        label="Segments"
+        value={form.segments.join(", ")}
+        readOnly={!canManage}
+        hint="Comma-separated lifecycle or campaign segments."
+        onChange={(event) =>
+          setForm({
+            ...form,
+            segments: event.target.value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+          })
+        }
+      />
+      <label className="admin-field">
+        Lifecycle stage
+        <select
+          className="admin-select"
+          value={form.lifecycleStage}
+          disabled={!canManage}
+          onChange={(event) =>
+            setForm({
+              ...form,
+              lifecycleStage: event.target.value as Customer["lifecycleStage"],
+            })
+          }
+        >
+          {[
+            ["new", "New"],
+            ["active", "Active"],
+            ["vip", "VIP"],
+            ["at_risk", "At risk"],
+            ["inactive", "Inactive"],
+          ].map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
           ))}
-        </div>
-        <p>
-          Update contact details and internal handling notes for this customer.
-        </p>
-      </div>
+        </select>
+      </label>
+      <label className="admin-field">
+        <span>Marketing consent</span>
+        <span>
+          <input
+            type="checkbox"
+            checked={form.marketingConsent}
+            disabled={!canManage}
+            onChange={(event) =>
+              setForm({ ...form, marketingConsent: event.target.checked })
+            }
+          />{" "}
+          Customer has recorded consent
+        </span>
+      </label>
       <AdminTextArea
         label="Internal notes"
         wide
@@ -113,12 +187,12 @@ function ProfileForm({
         readOnly={!canEditNotes}
         onChange={(event) => setForm({ ...form, notes: event.target.value })}
       />
-      {canEditNotes ? (
+      {canEditNotes || canManage ? (
         <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
-          <button type="button" onClick={reset}>
+          <button className="admin-btn quiet" type="button" onClick={reset}>
             Reset
           </button>
-          <button type="submit" className="primary">
+          <button type="submit" className="admin-btn primary">
             Save profile
           </button>
         </div>
@@ -131,14 +205,40 @@ export default function AdminCustomerDetailPage() {
   const params = useParams<{
     id: string;
   }>();
-  const { state, actions } = useDemo();
+  const { state, actions, refresh } = useDemo();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const customer = state.customers.find((item) => item.id === id);
+  const [supportTickets, setSupportTickets] = useState<
+    Array<{ id: string; subject: string; status: string; updatedAt: string }>
+  >([]);
+  const [history, setHistory] = useState<AuditEntry[]>([]);
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmAnonymize, setConfirmAnonymize] = useState(false);
+  useEffect(() => {
+    if (!customer) return;
+    void Promise.all([
+      api<{
+        tickets: Array<{
+          id: string;
+          subject: string;
+          status: string;
+          updatedAt: string;
+        }>;
+      }>("/api/admin/support?q=" + encodeURIComponent(customer.email)).then(
+        (result) => setSupportTickets(result.tickets),
+      ),
+      api<{ entries: AuditEntry[] }>(
+        "/api/admin/audit?record=" + encodeURIComponent(customer.id),
+      ).then((result) => setHistory(result.entries)),
+    ]).catch(() => undefined);
+  }, [customer]);
   if (!customer) notFound();
   const canEditNotes = hasCapability(
     state.adminSession?.role,
     "customers.support-note",
   );
+  const canManage = hasCapability(state.adminSession?.role, "customers.manage");
   const orders = [
     ...state.orders
       .filter((order) => order.customerId === customer.id)
@@ -167,10 +267,79 @@ export default function AdminCustomerDetailPage() {
   ];
   const saveProfile = async (patch: ProfilePatch) => {
     try {
-      await actions.updateCustomer(customer.id, { notes: patch.notes });
+      await actions.updateCustomer(
+        customer.id,
+        canManage ? patch : { notes: patch.notes },
+      );
       actions.notify(`Profile saved for ${patch.name}`, "success");
-    } catch (error) {}
+    } catch (error) {
+      actions.notify(
+        error instanceof Error ? error.message : "Could not save the profile.",
+        "error",
+      );
+    }
   };
+  function exportProfile() {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      customer,
+      orders,
+      returns,
+      sourcing,
+      supportTickets,
+      auditHistory: history,
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `paydan-customer-${id}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+  async function mergeProfile() {
+    if (!mergeTarget || busy) return;
+    setBusy(true);
+    try {
+      await api("/api/commands", {
+        name: "mergeCustomers",
+        args: [{ primaryId: id, secondaryId: mergeTarget }],
+        key: crypto.randomUUID(),
+      });
+      await refresh();
+      setMergeTarget("");
+      actions.notify("Duplicate profile merged into this customer.", "success");
+    } catch (error) {
+      actions.notify(
+        error instanceof Error ? error.message : "Could not merge profiles.",
+        "error",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function anonymizeProfile() {
+    if (!confirmAnonymize || busy) return;
+    setBusy(true);
+    try {
+      await api("/api/commands", {
+        name: "deleteCustomer",
+        args: [id],
+        key: crypto.randomUUID(),
+      });
+      await refresh();
+      window.location.assign("/admin/customers");
+    } catch (error) {
+      actions.notify(
+        error instanceof Error ? error.message : "Could not anonymize profile.",
+        "error",
+      );
+      setBusy(false);
+    }
+  }
   return (
     <>
       <AdminPageHeader
@@ -192,7 +361,52 @@ export default function AdminCustomerDetailPage() {
               customer={customer}
               onSave={saveProfile}
               canEditNotes={canEditNotes}
+              canManage={canManage}
             />
+          </section>
+
+          <section className="admin-card">
+            <h2>Support tickets</h2>
+            {supportTickets.length ? (
+              supportTickets.map((ticket) => (
+                <Link
+                  className="queue-item"
+                  href={`/admin/support?q=${encodeURIComponent(customer.email)}`}
+                  key={ticket.id}
+                >
+                  <span>
+                    <strong>{ticket.subject}</strong>
+                    <br />
+                    Updated {formatDateTime(ticket.updatedAt)}
+                  </span>
+                  <StatusPill
+                    tone={ticket.status === "resolved" ? "green" : "orange"}
+                  >
+                    {ticket.status.replaceAll("_", " ")}
+                  </StatusPill>
+                </Link>
+              ))
+            ) : (
+              <p>No support tickets match this customer.</p>
+            )}
+          </section>
+
+          <section className="admin-card">
+            <h2>Profile history</h2>
+            {history.length ? (
+              history.slice(0, 20).map((entry) => (
+                <div className="queue-item" key={entry.id}>
+                  <span>
+                    <strong>{entry.action}</strong>
+                    <br />
+                    {entry.actor}
+                  </span>
+                  <span>{formatDateTime(entry.at)}</span>
+                </div>
+              ))
+            ) : (
+              <p>No audited profile changes yet.</p>
+            )}
           </section>
 
           <section className="admin-card">
@@ -357,6 +571,64 @@ export default function AdminCustomerDetailPage() {
               <strong>{returns.length}</strong>
             </div>
           </div>
+          <div className="admin-actions" style={{ marginTop: "1rem" }}>
+            <button
+              type="button"
+              className="admin-btn secondary"
+              onClick={exportProfile}
+            >
+              Export customer data
+            </button>
+          </div>
+          {canManage ? (
+            <>
+              <hr
+                style={{ margin: "1.25rem 0", borderColor: "var(--border)" }}
+              />
+              <h3>Merge duplicate</h3>
+              <select
+                className="admin-select"
+                value={mergeTarget}
+                onChange={(event) => setMergeTarget(event.target.value)}
+              >
+                <option value="">Choose duplicate profile</option>
+                {state.customers
+                  .filter((item) => item.id !== customer.id)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {item.email}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                className="admin-btn secondary"
+                disabled={!mergeTarget || busy}
+                onClick={() => void mergeProfile()}
+              >
+                Merge into this profile
+              </button>
+              <h3 style={{ marginTop: "1.25rem" }}>Privacy request</h3>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={confirmAnonymize}
+                  onChange={(event) =>
+                    setConfirmAnonymize(event.target.checked)
+                  }
+                />{" "}
+                Confirm permanent anonymization
+              </label>
+              <button
+                type="button"
+                className="admin-btn danger"
+                disabled={!confirmAnonymize || busy}
+                onClick={() => void anonymizeProfile()}
+              >
+                Anonymize personal data
+              </button>
+            </>
+          ) : null}
         </aside>
       </div>
     </>

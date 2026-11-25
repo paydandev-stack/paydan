@@ -1,7 +1,13 @@
 import "server-only";
 import { emptyState } from "@/lib/empty-state";
 import { toPublicProduct, toMemberProduct } from "@/lib/catalog-dto";
-import type { DemoState, Order, Product, SourcingRequest } from "@/lib/types";
+import type {
+  DemoState,
+  Order,
+  Product,
+  SourcingRequest,
+  Vendor,
+} from "@/lib/types";
 import {
   isCustomerVisibleCategory,
   isCustomerVisibleProduct,
@@ -54,14 +60,24 @@ export async function snapshot(
   // A disconnected installation can still preview the approved public design.
   // The source fixtures are evaluated only on the server and never contain customer records here.
   if (!process.env.DATABASE_URL) {
-    const [{ products }, { categories }, { seedBanners }] = await Promise.all([
-      import("@/data/products"),
-      import("@/data/categories"),
-      import("@/data/promotions"),
-    ]);
+    const [{ products }, { categories }, { seedBanners }, { vendors }] =
+      await Promise.all([
+        import("@/data/products"),
+        import("@/data/categories"),
+        import("@/data/promotions"),
+        import("@/data/vendors"),
+      ]);
+    const vendorNames = new Map(
+      vendors.map((vendor) => [vendor.id, vendor.name]),
+    );
     state.products = products
       .filter((p) => p.status === "published" && !p.restricted)
-      .map(toPublicProduct) as unknown as Product[];
+      .map((product) =>
+        toPublicProduct({
+          ...product,
+          vendorName: vendorNames.get(product.vendorId),
+        }),
+      ) as unknown as Product[];
     state.categories = categories.filter(isCustomerVisibleCategory);
     state.banners = seedBanners;
     return state;
@@ -97,6 +113,12 @@ export async function snapshot(
     state.settings = publicSettings;
   }
   if (!operations || user?.role === "Support") {
+    const vendorNames = new Map(
+      (await records<Vendor>(db, "vendors")).map((vendor) => [
+        vendor.id,
+        vendor.name,
+      ]),
+    );
     const categoryBySlug = new Map(
       state.categories.map((category) => [category.slug, category]),
     );
@@ -108,7 +130,12 @@ export async function snapshot(
           categoryBySlug.get(product.categorySlug),
         ),
       )
-      .map(user ? toMemberProduct : toPublicProduct) as unknown as Product[];
+      .map((product) =>
+        (user ? toMemberProduct : toPublicProduct)({
+          ...product,
+          vendorName: vendorNames.get(product.vendorId),
+        }),
+      ) as unknown as Product[];
     state.banners = state.banners.filter(
       (b) =>
         b.active &&
@@ -155,6 +182,8 @@ export async function snapshot(
       phone?: string;
       city?: string;
       state?: string;
+      tags?: string[];
+      marketingConsent?: boolean;
     }>(db, "customers", user.id);
     state.customers = [
       {
@@ -163,6 +192,8 @@ export async function snapshot(
         email: user.email,
         joinedAt: "",
         segments: [],
+        tags: profile?.tags ?? [],
+        marketingConsent: profile?.marketingConsent ?? false,
         notes: "",
         phone: profile?.phone ?? "",
         city: profile?.city ?? state.location.city,

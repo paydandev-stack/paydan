@@ -64,12 +64,7 @@ export async function PATCH(request: Request) {
     delete rest.name;
     if (Object.keys(rest).length) {
       const { randomUUID } = await import("node:crypto");
-      await command(
-        user,
-        "updateCustomer",
-        [user.id, rest],
-        randomUUID(),
-      );
+      await command(user, "updateCustomer", [user.id, rest], randomUUID());
     }
     return mobileJson({ profile: await profileFor(user) });
   } catch (error) {

@@ -20,6 +20,7 @@ import { catalogCdnUrl } from "./media-delivery";
 import { signedCloudFrontUrl } from "./cloudfront";
 import { isTestBuyer } from "./test-buyer";
 import { writeAudit } from "./audit";
+import { assertVendorCatalogAccess } from "./vendor";
 import type { Banner, Product } from "@/lib/types";
 type Media = {
   id: string;
@@ -66,7 +67,10 @@ export async function beginUpload(user: Viewer, input: unknown) {
       size: z.number().int().min(1).max(5242880),
     })
     .parse(input);
-  if (value.purpose === "catalog") requireCapability(user, "catalog.write");
+  if (value.purpose === "catalog") {
+    if (user.role === "Vendor") await assertVendorCatalogAccess(user);
+    else requireCapability(user, "catalog.write");
+  }
   const { publicClient, bucket } = config();
   const id = randomUUID();
   const key = `${isTestBuyer(user) ? "test/" : ""}incoming/${user.id}/${id}`;
@@ -93,7 +97,10 @@ export async function finalizeUpload(user: Viewer, id: string) {
   );
   const media: Media = result.rows[0];
   if (!media) throw new HttpError(404, "Upload not found.");
-  if (media.purpose === "catalog") requireCapability(user, "catalog.write");
+  if (media.purpose === "catalog") {
+    if (user.role === "Vendor") await assertVendorCatalogAccess(user);
+    else requireCapability(user, "catalog.write");
+  }
   if (media.status === "ready")
     return {
       url:
@@ -159,7 +166,7 @@ export async function finalizeUpload(user: Viewer, id: string) {
       action: "media.finalized",
       record: id,
       capability: "catalog.write",
-      source: "admin",
+      source: user.role === "Vendor" ? "vendor" : "admin",
       after: { mime: "image/webp", size: image.length },
     });
   return {

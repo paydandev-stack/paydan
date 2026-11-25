@@ -8,7 +8,13 @@ import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
 import { findOrderLine } from "@/lib/order-lines";
 import { writeAudit } from "./audit";
 import { enqueueNotification } from "./notifications";
-export async function refundReturn(user: Viewer, returnId: string) {
+const LARGE_REFUND_APPROVAL_KOBO = 25_000_000;
+
+export async function refundReturn(
+  user: Viewer,
+  returnId: string,
+  requestedAmountKobo?: number,
+) {
   requireCapability(user, "refunds.issue");
   const prepared = await transaction(async (db) => {
     const request = await record<ReturnRequest>(db, "returns", returnId, true);
@@ -31,20 +37,28 @@ export async function refundReturn(user: Viewer, returnId: string) {
       );
     const item = findOrderLine(order, request.lineId);
     if (!item) throw new HttpError(400, "Order item not found.");
-    const amount = Math.floor(
+    const maximumAmount = Math.floor(
       (kobo(item.unitPrice) *
         request.quantity *
         (kobo(order.subtotal) - kobo(order.discount))) /
         kobo(order.subtotal),
     );
+    const amount = requestedAmountKobo ?? maximumAmount;
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > maximumAmount)
+      throw new HttpError(
+        400,
+        `Refund must be between NGN 0.01 and NGN ${(maximumAmount / 100).toFixed(2)}.`,
+      );
+    if (amount > LARGE_REFUND_APPROVAL_KOBO && user.role !== "Super Admin")
+      throw new HttpError(
+        403,
+        "Refunds above NGN 250,000 require Super Admin approval.",
+      );
     const total = await db.query(
       "SELECT COALESCE(sum(amount_kobo),0) AS amount FROM refund WHERE order_id=$1 AND status<>'failed'",
       [order.id],
     );
-    if (
-      amount <= 0 ||
-      Number(total.rows[0].amount) + amount > kobo(order.total)
-    )
+    if (Number(total.rows[0].amount) + amount > kobo(order.total))
       throw new HttpError(409, "Refund exceeds the remaining paid amount.");
     const id = randomUUID();
     await db.query(
@@ -57,7 +71,24 @@ export async function refundReturn(user: Viewer, returnId: string) {
       record: returnId,
       capability: "refunds.issue",
       source: "admin",
+      after: {
+        amountKobo: amount,
+        partial: amount < maximumAmount,
+      },
     });
+    await put(
+      db,
+      "returns",
+      request.id,
+      {
+        ...request,
+        partialRefundAmount:
+          amount < maximumAmount
+            ? Number((amount / 100).toFixed(2))
+            : undefined,
+      },
+      request.customerId,
+    );
     return {
       id,
       reference: order.reference,
@@ -72,15 +103,29 @@ export async function refundReturn(user: Viewer, returnId: string) {
         "Refund already submitted. Check its status before taking further action.",
     };
   // A network timeout is ambiguous. Never submit a second refund automatically.
-  const data = await paystack("/refund", "POST", {
-    transaction: prepared.reference,
-    amount: Number(prepared.amount_kobo),
-    currency: "NGN",
-    merchant_note: `PAYDAN refund ${prepared.id}`,
-    customer_note: "Approved PAYDAN return",
-  });
+  let data: Record<string, any>;
+  try {
+    data = await paystack("/refund", "POST", {
+      transaction: prepared.reference,
+      amount: Number(prepared.amount_kobo),
+      currency: "NGN",
+      merchant_note: `PAYDAN refund ${prepared.id}`,
+      customer_note: "Approved PAYDAN return",
+    });
+  } catch (error) {
+    await database().query(
+      "UPDATE refund SET status='submission_unknown',last_error=$2,updated_at=now() WHERE id=$1",
+      [
+        prepared.id,
+        error instanceof Error
+          ? error.message.slice(0, 1000)
+          : "Provider request failed.",
+      ],
+    );
+    throw error;
+  }
   await database().query(
-    "UPDATE refund SET provider_id=$2,status=$3 WHERE id=$1",
+    "UPDATE refund SET provider_id=$2,status=$3,last_error=NULL,updated_at=now() WHERE id=$1",
     [prepared.id, String(data.id), String(data.status)],
   );
   return {
@@ -90,7 +135,21 @@ export async function refundReturn(user: Viewer, returnId: string) {
   };
 }
 export async function verifyRefund(providerId: string) {
-  const data = await paystack(`/refund/${encodeURIComponent(providerId)}`);
+  let data: Record<string, any>;
+  try {
+    data = await paystack(`/refund/${encodeURIComponent(providerId)}`);
+  } catch (error) {
+    await database().query(
+      "UPDATE refund SET last_error=$2,updated_at=now() WHERE provider_id=$1",
+      [
+        providerId,
+        error instanceof Error
+          ? error.message.slice(0, 1000)
+          : "Provider verification failed.",
+      ],
+    );
+    throw error;
+  }
   const local = await database().query(
     "SELECT * FROM refund WHERE provider_id=$1",
     [providerId],
@@ -111,10 +170,10 @@ export async function verifyRefund(providerId: string) {
     const order = await record<Order>(db, "orders", refund.order_id, true);
     if (!order || data.transaction?.reference !== order.reference)
       throw new HttpError(409, "Refund transaction does not match.");
-    await db.query("UPDATE refund SET status=$2 WHERE id=$1", [
-      refund.id,
-      String(data.status),
-    ]);
+    await db.query(
+      "UPDATE refund SET status=$2,last_error=NULL,updated_at=now() WHERE id=$1",
+      [refund.id, String(data.status)],
+    );
     if (data.status !== "processed") return;
     const request = await record<ReturnRequest>(
       db,

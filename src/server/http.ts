@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+﻿import { createHash } from "node:crypto";
 import { z } from "zod";
 import { auth } from "./auth";
-import { database, records } from "./db";
+import { database, put, records } from "./db";
 import type { AdminRole, TeamMember } from "@/lib/types";
 import { hasCapability, type AdminCapability } from "@/lib/capabilities";
 import { isTrustedOrigin } from "./origins";
@@ -20,6 +20,8 @@ export type Viewer = {
   name: string;
   email: string;
   role?: AdminRole;
+  teamMemberId?: string;
+  vendorId?: string;
 };
 export async function viewer(headers: Headers): Promise<Viewer | null> {
   if (!process.env.DATABASE_URL || !process.env.BETTER_AUTH_SECRET) return null;
@@ -38,21 +40,40 @@ export async function viewer(headers: Headers): Promise<Viewer | null> {
         state: "",
         joinedAt: new Date().toISOString(),
         segments: [],
+        tags: [],
+        marketingConsent: false,
         notes: "",
       }),
     ],
   );
   const team = await records<TeamMember>(database(), "team");
-  const member = team.find(
-    (m) =>
-      m.email.toLowerCase() === session.user.email.toLowerCase() &&
-      m.status === "active",
+  const email = session.user.email.toLowerCase();
+  let member = team.find(
+    (m) => m.email.toLowerCase() === email && m.status === "active",
   );
+  if (!member) {
+    const invitedMember = team.find(
+      (m) =>
+        m.email.toLowerCase() === email &&
+        m.status === "invited" &&
+        (m.role !== "Vendor" || Boolean(m.vendorId)),
+    );
+    if (invitedMember) {
+      member = {
+        ...invitedMember,
+        status: "active",
+        lastActive: new Date().toISOString(),
+      };
+      await put(database(), "team", member.id, member);
+    }
+  }
   const result = {
     id: session.user.id,
     name: session.user.name,
     email: session.user.email,
     role: member?.role,
+    teamMemberId: member?.id,
+    vendorId: member?.vendorId,
   };
   await ensureTestBuyerData(result);
   return result;

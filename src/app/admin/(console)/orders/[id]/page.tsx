@@ -57,10 +57,7 @@ export default function AdminOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order?.id]);
   if (!order) notFound();
-  const canManage = hasCapability(
-    state.adminSession?.role,
-    "orders.fulfil",
-  );
+  const canManage = hasCapability(state.adminSession?.role, "orders.fulfil");
   if (hasCapability(state.adminSession?.role, "support.read"))
     return (
       <>
@@ -135,9 +132,23 @@ export default function AdminOrderDetailPage() {
         title={order.reference}
         description={`Placed ${formatDate(order.placedAt)} · Tracking ${order.trackingCode} · ${order.customerName} · ${fulfillmentStatusMeta[order.fulfillmentStatus].label}`}
         action={
-          <Link className="admin-btn quiet" href="/admin/orders">
-            All orders
-          </Link>
+          <div className="admin-actions">
+            <Link className="admin-btn quiet" href="/admin/orders">
+              All orders
+            </Link>
+            <Link
+              className="admin-btn quiet"
+              href={"/admin/orders/" + order.id + "/print"}
+            >
+              Invoice
+            </Link>
+            <Link
+              className="admin-btn quiet"
+              href={"/admin/orders/" + order.id + "/print?type=packing"}
+            >
+              Packing slip
+            </Link>
+          </div>
         }
       />
 

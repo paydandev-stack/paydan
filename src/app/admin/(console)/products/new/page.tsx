@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
@@ -127,6 +127,7 @@ const flagCopy: {
 /** Blank catalogue form used by the new-product route. */
 export default function AdminNewProductPage() {
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
   const router = useRouter();
   const { state, actions } = useDemo();
   const [form, setForm] = useState<ProductForm>({
@@ -163,6 +164,7 @@ export default function AdminNewProductPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     try {
       event.preventDefault();
+      setSaving(true);
       const name = form.name.trim();
       const brand = form.brand.trim();
       const price = parseAmount(form.price);
@@ -277,7 +279,14 @@ export default function AdminNewProductPage() {
           : `${name} saved as ${productStatusMeta[form.status].label.toLowerCase()}.`,
       );
       router.push("/admin/products");
-    } catch (error) {}
+    } catch (error) {
+      actions.notify(
+        error instanceof Error ? error.message : "Could not save product.",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <>
@@ -294,9 +303,14 @@ export default function AdminNewProductPage() {
 
       <form onSubmit={handleSubmit}>
         <MediaUpload
+          images={uploadedImages}
           onUploaded={(url) => setUploadedImages((images) => [...images, url])}
+          onRemove={(url) =>
+            setUploadedImages((images) =>
+              images.filter((image) => image !== url),
+            )
+          }
         />
-        <p>{uploadedImages.length} images uploaded.</p>
         <div className="admin-panels wide">
           <section className="admin-card">
             <h2>Listing details</h2>
@@ -346,14 +360,14 @@ export default function AdminNewProductPage() {
                 ]}
               />
               <SelectField
-                label="Supplying vendor"
+                label="Product vendor"
                 value={form.vendorId}
                 onChange={(value) => set("vendorId", value)}
                 options={state.vendors.map((item) => ({
                   value: item.id,
                   label: item.name,
                 }))}
-                hint="Internal field — never shown to shoppers."
+                hint="The selected vendor name appears on the storefront product card."
               />
               <AdminTextField
                 label="Price (₦)"
@@ -574,10 +588,32 @@ export default function AdminNewProductPage() {
           </section>
         </div>
 
-        <div className="form-actions">
-          <Link href="/admin/products">Cancel</Link>
-          <button type="submit" className="primary">
-            Save product
+        <div className="admin-sticky-actions">
+          <span className="admin-form-state" role="status">
+            {saving
+              ? "Saving product…"
+              : form.status === "published"
+                ? "Ready to publish"
+                : "Draft ready"}
+          </span>
+          <Link className="admin-btn quiet" href="/admin/products">
+            Cancel
+          </Link>
+          <button
+            type="submit"
+            className="admin-btn secondary"
+            disabled={saving}
+            onClick={() => set("status", "draft")}
+          >
+            Save draft
+          </button>
+          <button
+            type="submit"
+            className="admin-btn primary"
+            disabled={saving}
+            onClick={() => set("status", "published")}
+          >
+            Publish product
           </button>
         </div>
       </form>

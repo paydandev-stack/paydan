@@ -19,8 +19,8 @@ type Draft = {
   order: string;
   active: boolean;
   restricted: boolean;
-  facets: string;
-  subcategories: string;
+  facets: string[];
+  subcategories: Category["subcategories"];
   shortDescription: string;
   homepageVisible: boolean;
   homepageOrder: string;
@@ -33,10 +33,8 @@ function toDraft(category: Category): Draft {
     order: String(category.order),
     active: category.active !== false,
     restricted: category.restricted,
-    facets: category.facets.join(", "),
-    subcategories: category.subcategories
-      .map((subcategory) => `${subcategory.slug}: ${subcategory.name}`)
-      .join("\n"),
+    facets: [...category.facets],
+    subcategories: category.subcategories.map((item) => ({ ...item })),
     shortDescription: category.shortDescription ?? "",
     homepageVisible: category.homepageVisible !== false,
     homepageOrder: String(category.homepageOrder ?? category.order),
@@ -47,6 +45,7 @@ export default function AdminCategoriesPage() {
   const { state, actions } = useDemo();
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [draggedSlug, setDraggedSlug] = useState<string | null>(null);
   const categories = [...state.categories].sort((a, b) => a.order - b.order);
   function openEditor(category: Category) {
     setSelectedSlug(category.slug);
@@ -76,6 +75,24 @@ export default function AdminCategoriesPage() {
       if (!orderText || !Number.isFinite(order)) {
         return actions.notify("Sort order must be a number.", "error");
       }
+      const facetKeys = draft.facets.map((item) => item.trim().toLowerCase());
+      const subcategoryKeys = draft.subcategories.map((item) =>
+        item.slug.trim().toLowerCase(),
+      );
+      if (new Set(facetKeys).size !== facetKeys.length)
+        return actions.notify("Each facet must be unique.", "error");
+      if (new Set(subcategoryKeys).size !== subcategoryKeys.length)
+        return actions.notify("Each subcategory slug must be unique.", "error");
+      if (
+        draft.facets.some((item) => !item.trim()) ||
+        draft.subcategories.some(
+          (item) => !item.name.trim() || !/^[a-z0-9-]+$/.test(item.slug),
+        )
+      )
+        return actions.notify(
+          "Complete every facet and subcategory. Slugs use lowercase letters, numbers and hyphens.",
+          "error",
+        );
       await actions.updateCategory(selectedSlug, {
         name,
         title,
@@ -83,19 +100,11 @@ export default function AdminCategoriesPage() {
         order,
         active: draft.active,
         restricted: draft.restricted,
-        facets: draft.facets
-          .split(",")
-          .map((facet) => facet.trim())
-          .filter(Boolean),
-        subcategories: draft.subcategories
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => {
-            const [slug, ...name] = line.split(":");
-            return { slug: slug.trim(), name: name.join(":").trim() };
-          })
-          .filter((item) => item.slug && item.name),
+        facets: draft.facets.map((facet) => facet.trim()),
+        subcategories: draft.subcategories.map((item) => ({
+          slug: item.slug.trim(),
+          name: item.name.trim(),
+        })),
         shortDescription: draft.shortDescription.trim(),
         homepageVisible: draft.homepageVisible,
         homepageOrder: Number(draft.homepageOrder) || order,
@@ -107,6 +116,23 @@ export default function AdminCategoriesPage() {
   const selected = selectedSlug
     ? categories.find((item) => item.slug === selectedSlug)
     : undefined;
+  const reorder = async (targetSlug: string) => {
+    if (!draggedSlug || draggedSlug === targetSlug) return;
+    const from = categories.findIndex((item) => item.slug === draggedSlug);
+    const to = categories.findIndex((item) => item.slug === targetSlug);
+    if (from < 0 || to < 0) return;
+    const next = [...categories];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    try {
+      for (const [index, category] of next.entries())
+        if (category.order !== index + 1)
+          await actions.updateCategory(category.slug, { order: index + 1 });
+      actions.notify("Navigation order updated.");
+    } finally {
+      setDraggedSlug(null);
+    }
+  };
   return (
     <>
       <Link className="admin-btn" href="/admin/categories/new">
@@ -139,7 +165,19 @@ export default function AdminCategoriesPage() {
               caption="Departments sorted by navigation order"
             >
               {categories.map((category) => (
-                <div className="table-row" key={category.slug}>
+                <div
+                  className="table-row"
+                  key={category.slug}
+                  draggable
+                  onDragStart={() => setDraggedSlug(category.slug)}
+                  onDragEnd={() => setDraggedSlug(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => void reorder(category.slug)}
+                  style={{
+                    opacity: draggedSlug === category.slug ? 0.55 : 1,
+                    cursor: "grab",
+                  }}
+                >
                   <span>
                     <span
                       style={{
@@ -288,23 +326,121 @@ export default function AdminCategoriesPage() {
                   <small>Hidden from public department lists.</small>
                 </span>
               </label>
-              <AdminTextField
-                label="Facets"
-                value={draft.facets}
-                onChange={(event) =>
-                  setDraftField("facets", event.target.value)
-                }
-                hint="Comma-separated filters, e.g. Storage, Colour."
-              />
-              <AdminTextArea
-                label="Subcategories"
-                rows={5}
-                value={draft.subcategories}
-                onChange={(event) =>
-                  setDraftField("subcategories", event.target.value)
-                }
-                hint="One per line as slug: Display name."
-              />
+              <fieldset className="admin-field">
+                <legend>Facets</legend>
+                {draft.facets.map((facet, index) => (
+                  <div className="admin-actions" key={`facet-${index}`}>
+                    <input
+                      className="admin-input"
+                      aria-label={`Facet ${index + 1}`}
+                      value={facet}
+                      onChange={(event) =>
+                        setDraftField(
+                          "facets",
+                          draft.facets.map((item, itemIndex) =>
+                            itemIndex === index ? event.target.value : item,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="admin-btn danger"
+                      onClick={() =>
+                        setDraftField(
+                          "facets",
+                          draft.facets.filter(
+                            (_, itemIndex) => itemIndex !== index,
+                          ),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="admin-btn secondary"
+                  onClick={() => setDraftField("facets", [...draft.facets, ""])}
+                >
+                  Add facet
+                </button>
+              </fieldset>
+              <fieldset className="admin-field">
+                <legend>Subcategories</legend>
+                {draft.subcategories.map((subcategory, index) => (
+                  <div className="form-grid" key={`subcategory-${index}`}>
+                    <input
+                      className="admin-input"
+                      aria-label={`Subcategory ${index + 1} name`}
+                      placeholder="Display name"
+                      value={subcategory.name}
+                      onChange={(event) => {
+                        const name = event.target.value;
+                        const slug = name
+                          .toLowerCase()
+                          .trim()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "");
+                        setDraftField(
+                          "subcategories",
+                          draft.subcategories.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, name, slug }
+                              : item,
+                          ),
+                        );
+                      }}
+                    />
+                    <input
+                      className="admin-input"
+                      aria-label={`Subcategory ${index + 1} slug`}
+                      placeholder="slug"
+                      value={subcategory.slug}
+                      onChange={(event) =>
+                        setDraftField(
+                          "subcategories",
+                          draft.subcategories.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...item,
+                                  slug: event.target.value.toLowerCase(),
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="admin-btn danger"
+                      onClick={() =>
+                        setDraftField(
+                          "subcategories",
+                          draft.subcategories.filter(
+                            (_, itemIndex) => itemIndex !== index,
+                          ),
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="admin-btn secondary"
+                  onClick={() =>
+                    setDraftField("subcategories", [
+                      ...draft.subcategories,
+                      { name: "", slug: "" },
+                    ])
+                  }
+                >
+                  Add subcategory
+                </button>
+              </fieldset>
               <label
                 className={`choice${draft.homepageVisible ? " active" : ""}`}
                 style={{ margin: 0 }}
@@ -344,6 +480,24 @@ export default function AdminCategoriesPage() {
                 >
                   Cancel
                 </button>
+              </div>
+              <div className="admin-note">
+                <strong>Storefront preview</strong>
+                <p style={{ margin: ".4rem 0" }}>
+                  {draft.name || "Department"}
+                </p>
+                <small>
+                  {draft.shortDescription ||
+                    draft.description ||
+                    "Add a short summary."}
+                </small>
+                <div className="admin-chips" style={{ marginTop: ".6rem" }}>
+                  {draft.subcategories.map((item, index) => (
+                    <span className="admin-chip" key={`${item.slug}-${index}`}>
+                      {item.name || "New subcategory"}
+                    </span>
+                  ))}
+                </div>
               </div>
             </form>
           ) : (

@@ -1,23 +1,8 @@
 import "server-only";
+import { mediaCdnBase } from "@/lib/media-origin";
 
 function cdnBase(): URL | null {
-  const value = process.env.MEDIA_CDN_URL?.trim();
-  if (!value) return null;
-
-  const url = new URL(value);
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error(
-      "MEDIA_CDN_URL must be a public HTTPS origin without credentials, a query, or a fragment.",
-    );
-  }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
-  return url;
+  return mediaCdnBase(process.env.MEDIA_CDN_URL);
 }
 
 export function catalogCdnUrl(objectKey: string): string | null {

@@ -103,10 +103,7 @@ export default function ProductPage() {
             item.id !== product.id,
         )
         .slice(0, 5);
-  const related = toViewerProducts(
-    relatedSource,
-    { pricesVisible: signedIn },
-  );
+  const related = toViewerProducts(relatedSource, { pricesVisible: signedIn });
 
   return (
     <div className="wrap product-page">
@@ -163,6 +160,13 @@ export default function ProductPage() {
             {category?.name ?? product.categorySlug} · {product.brand}
           </span>
           <h1>{product.name}</h1>
+
+          {product.vendorName ? (
+            <p className="pdp-vendor">
+              <span>Vendor</span>
+              <strong>{product.vendorName}</strong>
+            </p>
+          ) : null}
 
           <p className="pdp-rating">
             <StarIcon /> {product.rating.toFixed(1)} ·{" "}

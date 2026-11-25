@@ -2,6 +2,7 @@
 
 import Image from "@/components/safe-image";
 import Link from "next/link";
+import { BannerLink } from "@/components/storefront/banner-link";
 import { useDemo } from "@/lib/store";
 import { visibleProducts } from "@/lib/catalog";
 import { percentOff } from "@/lib/format";
@@ -30,10 +31,13 @@ export default function HomePage() {
   const { state } = useDemo();
 
   const products = visibleProducts(state.products);
-  const hero = state.banners.find(
+  const rankedBanners = [...state.banners].sort(
+    (left, right) => (right.priority ?? 0) - (left.priority ?? 0),
+  );
+  const hero = rankedBanners.find(
     (banner) => banner.active && banner.placement === "hero",
   );
-  const sideBanners = state.banners
+  const sideBanners = rankedBanners
     .filter((banner) => banner.active && banner.placement === "side")
     .slice(0, 2);
   const signedIn = Boolean(state.customerSession);
@@ -101,10 +105,21 @@ export default function HomePage() {
                 {hero?.subtitle ??
                   "Shop everyday essentials, standout technology and fresh finds — all through one trusted storefront."}
               </p>
-              <Link className="primary-button" href={hero?.href ?? "/shop"}>
-                {hero?.ctaLabel ?? "Explore the collection"}
-                <ArrowRightIcon />
-              </Link>
+              {hero ? (
+                <BannerLink
+                  className="primary-button"
+                  href={hero.href}
+                  bannerId={hero.id}
+                >
+                  {hero.ctaLabel}
+                  <ArrowRightIcon />
+                </BannerLink>
+              ) : (
+                <Link className="primary-button" href="/shop">
+                  Explore the collection
+                  <ArrowRightIcon />
+                </Link>
+              )}
             </div>
           </div>
 
@@ -126,10 +141,10 @@ export default function HomePage() {
                   >
                     <span>{banner.eyebrow}</span>
                     <h2>{banner.title}</h2>
-                    <Link href={banner.href}>
+                    <BannerLink href={banner.href} bannerId={banner.id}>
                       {banner.ctaLabel}
                       <ArrowRightIcon />
-                    </Link>
+                    </BannerLink>
                   </article>
                 ))
               : [

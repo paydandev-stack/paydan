@@ -1,7 +1,9 @@
-"use client";
+﻿"use client";
 import Image from "@/components/safe-image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "@/lib/api-client";
+import { downloadCsv, parseCsv } from "@/lib/csv";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -20,11 +22,18 @@ function marginPercent(price: number, costPrice: number): number | null {
 }
 /** Catalogue table: search, status/category filters, margin view and status controls. */
 export default function AdminProductsPage() {
-  const { state, actions } = useDemo();
+  const { state, actions, refresh } = useDemo();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
   const [visibleCount, setVisibleCount] = useState(50);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkVendor, setBulkVendor] = useState("");
+  const [bulkCategory, setBulkCategory] = useState("");
+  const [scheduleAt, setScheduleAt] = useState("");
+  const [notice, setNotice] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
     return state.products.filter((product) => {
@@ -39,6 +48,12 @@ export default function AdminProductsPage() {
     });
   }, [state.products, query, status, category]);
   useEffect(() => setVisibleCount(50), [query, status, category]);
+  useEffect(() => {
+    const statusParam = new URLSearchParams(window.location.search).get(
+      "status",
+    );
+    if (statusParam) setStatus(statusParam);
+  }, []);
   const visibleProducts = filtered.slice(0, visibleCount);
   const published = state.products.filter(
     (product) => product.status === "published",
@@ -57,6 +72,100 @@ export default function AdminProductsPage() {
         ) / priced.length,
       )
     : 0;
+  async function runBulk(name: string, args: unknown[], success: string) {
+    if (!selected.length || bulkBusy) return;
+    setBulkBusy(true);
+    setNotice("");
+    try {
+      await api("/api/commands", {
+        name,
+        args,
+        key: crypto.randomUUID(),
+      });
+      await refresh();
+      setNotice(success);
+      actions.notify(success, "success");
+      setSelected([]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Action failed.";
+      setNotice(message);
+      actions.notify(message, "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+  function exportProducts() {
+    const rows = (
+      selected.length
+        ? state.products.filter((product) => selected.includes(product.id))
+        : filtered
+    ).map((product) => [
+      product.name,
+      product.sku,
+      product.categorySlug,
+      product.vendorId,
+      product.price,
+      product.costPrice,
+      product.description,
+      product.brand,
+      product.status,
+    ]);
+    downloadCsv("paydan-products.csv", [
+      [
+        "name",
+        "sku",
+        "categorySlug",
+        "vendorId",
+        "price",
+        "costPrice",
+        "description",
+        "brand",
+        "status",
+      ],
+      ...rows,
+    ]);
+  }
+  async function importProducts(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const rows = parseCsv(await file.text());
+      const [header, ...data] = rows;
+      const index = (name: string) => header.indexOf(name);
+      const entries = data
+        .map((row) => ({
+          name: row[index("name")] ?? "",
+          sku: row[index("sku")] ?? "",
+          categorySlug: row[index("categorySlug")] ?? "",
+          vendorId: row[index("vendorId")] ?? "",
+          price: Number(row[index("price")]),
+          costPrice: Number(row[index("costPrice")]),
+          description: row[index("description")] || undefined,
+          brand: row[index("brand")] || undefined,
+        }))
+        .filter((entry) => entry.name && entry.sku);
+      if (!entries.length)
+        throw new Error("The CSV must include name and sku columns.");
+      setBulkBusy(true);
+      setNotice("");
+      await api("/api/commands", {
+        name: "importProducts",
+        args: [entries],
+        key: crypto.randomUUID(),
+      });
+      await refresh();
+      const message = "Imported " + entries.length + " draft products.";
+      setNotice(message);
+      actions.notify(message, "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Import failed.";
+      setNotice(message);
+      actions.notify(message, "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
   return (
     <>
       <AdminPageHeader
@@ -137,6 +246,167 @@ export default function AdminProductsPage() {
         />
       </div>
 
+      <section
+        className="admin-card bulk-toolbar"
+        aria-label="Bulk catalogue actions"
+      >
+        <div className="bulk-toolbar-head">
+          <strong>{selected.length} selected</strong>
+          <span>
+            Select products in the table to publish, archive, duplicate or
+            reassign them. Exports use the current filters when nothing is
+            selected.
+          </span>
+        </div>
+        {notice ? <p role="status">{notice}</p> : null}
+        <div className="admin-actions">
+          <button
+            className="admin-btn"
+            disabled={!selected.length || bulkBusy}
+            onClick={() =>
+              void runBulk(
+                "bulkProductStatus",
+                [{ ids: selected, status: "published" }],
+                "Selected products published.",
+              )
+            }
+          >
+            Publish selected
+          </button>
+          <button
+            className="admin-btn secondary"
+            disabled={!selected.length || bulkBusy}
+            onClick={() =>
+              void runBulk(
+                "bulkProductStatus",
+                [{ ids: selected, status: "draft" }],
+                "Selected products moved to draft.",
+              )
+            }
+          >
+            Move to draft
+          </button>
+          <button
+            className="admin-btn quiet"
+            disabled={!selected.length || bulkBusy}
+            onClick={() =>
+              void runBulk(
+                "bulkProductStatus",
+                [{ ids: selected, status: "archived" }],
+                "Selected products archived.",
+              )
+            }
+          >
+            Archive
+          </button>
+          <button
+            className="admin-btn quiet"
+            disabled={selected.length !== 1 || bulkBusy}
+            onClick={() =>
+              void runBulk(
+                "duplicateProduct",
+                [selected[0]],
+                "Product duplicated as a draft.",
+              )
+            }
+          >
+            Duplicate
+          </button>
+          <label>
+            Supplier
+            <select
+              value={bulkVendor}
+              onChange={(event) => setBulkVendor(event.target.value)}
+            >
+              <option value="">Keep existing</option>
+              {state.vendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Department
+            <select
+              value={bulkCategory}
+              onChange={(event) => setBulkCategory(event.target.value)}
+            >
+              <option value="">Keep existing</option>
+              {state.categories.map((item) => (
+                <option key={item.slug} value={item.slug}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="admin-btn secondary"
+            disabled={
+              !selected.length || bulkBusy || (!bulkVendor && !bulkCategory)
+            }
+            onClick={() =>
+              void runBulk(
+                "bulkReassignProducts",
+                [
+                  {
+                    ids: selected,
+                    vendorId: bulkVendor || undefined,
+                    categorySlug: bulkCategory || undefined,
+                  },
+                ],
+                "Selected products reassigned and moved to draft.",
+              )
+            }
+          >
+            Reassign
+          </button>
+          <label>
+            Publish at
+            <input
+              type="datetime-local"
+              value={scheduleAt}
+              onChange={(event) => setScheduleAt(event.target.value)}
+            />
+          </label>
+          <button
+            className="admin-btn secondary"
+            disabled={!selected.length || !scheduleAt || bulkBusy}
+            onClick={() =>
+              void runBulk(
+                "scheduleProductPublish",
+                [selected[0], new Date(scheduleAt).toISOString()],
+                "Publish scheduled for the first selected product.",
+              )
+            }
+          >
+            Schedule
+          </button>
+          <button
+            type="button"
+            className="admin-btn quiet"
+            onClick={exportProducts}
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            className="admin-btn quiet"
+            disabled={bulkBusy}
+            onClick={() => importRef.current?.click()}
+          >
+            Import CSV
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={(event) => void importProducts(event)}
+          />
+        </div>
+      </section>
+
       {filtered.length === 0 ? (
         <AdminEmpty
           title="No products match these filters"
@@ -144,8 +414,9 @@ export default function AdminProductsPage() {
         />
       ) : (
         <AdminTable
-          template=".9fr 1.1fr 1fr 1.1fr .9fr"
+          template=".35fr .9fr 1.1fr 1fr 1.1fr .9fr"
           head={[
+            "",
             "Product",
             "Category",
             "Price & margin",
@@ -162,6 +433,20 @@ export default function AdminProductsPage() {
               )?.name ?? product.categorySlug;
             return (
               <div className="table-row" key={product.id}>
+                <span>
+                  <input
+                    type="checkbox"
+                    aria-label={"Select " + product.name}
+                    checked={selected.includes(product.id)}
+                    onChange={(event) =>
+                      setSelected((current) =>
+                        event.target.checked
+                          ? [...current, product.id]
+                          : current.filter((id) => id !== product.id),
+                      )
+                    }
+                  />
+                </span>
                 <span
                   style={{
                     display: "flex",

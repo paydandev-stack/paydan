@@ -23,7 +23,12 @@ export async function enqueueMail(
   db: Queryable,
   input: QueueMailInput,
 ): Promise<boolean> {
-  const rendered = renderMail(input.template, input.data);
+  const overrides = await record<{
+    orderSubject?: string;
+    supportSubject?: string;
+    replyTo?: string;
+  }>(db, "notificationTemplates", "mail");
+  const rendered = renderMail(input.template, input.data, overrides);
   const result = await db.query(
     `INSERT INTO mail_outbox(id,recipient,subject,body,event_key,event_type,audience,template_key,template_data,html,reply_to)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -39,7 +44,7 @@ export async function enqueueMail(
       input.template,
       JSON.stringify(input.data),
       rendered.html,
-      input.replyTo || process.env.MAIL_REPLY_TO || null,
+      input.replyTo || overrides?.replyTo || process.env.MAIL_REPLY_TO || null,
     ],
   );
   return result.rows.length > 0;

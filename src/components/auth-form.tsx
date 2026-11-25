@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "@/lib/api-client";
@@ -7,9 +7,15 @@ import { readIntent, rememberIntent, safePath } from "@/lib/intent";
 export function AuthForm({
   mode = "login",
 }: {
-  mode?: "login" | "register" | "forgot" | "reset" | "verify" | "admin";
+  mode?:
+    "login" | "register" | "forgot" | "reset" | "verify" | "admin" | "vendor";
 }) {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [invite, setInvite] = useState<{
+    token: string;
+    email: string;
+    vendorName: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -21,7 +27,25 @@ export function AuthForm({
       );
     const next = params.get("next");
     if (next && !readIntent()) rememberIntent({ path: safePath(next) });
+    const token = params.get("invite");
+    if (mode === "vendor" && token) {
+      api<{ token: string; email: string; vendorName: string }>(
+        "/api/vendor/invites/" + encodeURIComponent(token),
+      )
+        .then((result) => {
+          setInvite(result);
+          setForm((current) => ({ ...current, email: result.email }));
+        })
+        .catch((reason) =>
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "This invitation is invalid.",
+          ),
+        );
+    }
   }, []);
+  const setup = mode === "vendor" && Boolean(invite);
   const title =
     mode === "register"
       ? "Make yourself at home."
@@ -33,7 +57,11 @@ export function AuthForm({
             ? "Check your inbox."
             : mode === "admin"
               ? "PAYDAN operations"
-              : "Welcome back.";
+              : mode === "vendor"
+                ? setup
+                  ? "Set up vendor access"
+                  : "Vendor portal"
+                : "Welcome back.";
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -66,6 +94,22 @@ export function AuthForm({
         setMessage(
           "If verification is needed, a new link will arrive by email.",
         );
+      } else if (mode === "vendor" && invite) {
+        if (form.password.length < 12)
+          throw new Error("Choose a password of at least 12 characters.");
+        await api("/api/auth/sign-up/email", {
+          name: form.name.trim(),
+          email: invite.email,
+          password: form.password,
+          callbackURL: "/vendor/login",
+        });
+        await api(
+          "/api/vendor/invites/" + encodeURIComponent(invite.token),
+          {},
+        );
+        setMessage(
+          "Vendor account created. Verify your email, then sign in at this page.",
+        );
       } else if (mode === "register") {
         await api("/api/auth/sign-up/email", {
           ...form,
@@ -82,7 +126,13 @@ export function AuthForm({
         const channel = new BroadcastChannel("paydan-auth");
         channel.postMessage("changed");
         channel.close();
-        location.assign(mode === "admin" ? "/admin" : "/dashboard");
+        location.assign(
+          mode === "admin"
+            ? "/admin"
+            : mode === "vendor"
+              ? "/vendor"
+              : "/dashboard",
+        );
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : "Please try again.");
@@ -96,8 +146,18 @@ export function AuthForm({
     try {
       const result = await api<{ url?: string }>("/api/auth/sign-in/social", {
         provider: "google",
-        callbackURL: mode === "admin" ? "/admin" : "/dashboard",
-        errorCallbackURL: mode === "admin" ? "/admin/login" : "/login",
+        callbackURL:
+          mode === "admin"
+            ? "/admin"
+            : mode === "vendor"
+              ? "/vendor"
+              : "/dashboard",
+        errorCallbackURL:
+          mode === "admin"
+            ? "/admin/login"
+            : mode === "vendor"
+              ? "/vendor/login"
+              : "/login",
       });
       if (!result.url) throw new Error("Google sign-in is not configured yet.");
       const url = new URL(result.url);
@@ -148,7 +208,11 @@ export function AuthForm({
               ? "Your dashboard brings together member prices, saved finds and every order."
               : mode === "admin"
                 ? "Use your verified account. Access is assigned by your administrator."
-                : "We’ll help you get back to your account."}
+                : mode === "vendor"
+                  ? setup
+                    ? "Create the password for your PAYDAN vendor account."
+                    : "Sign in with the email PAYDAN registered for your business."
+                  : "We’ll help you get back to your account."}
           </p>
           {["login", "register", "admin"].includes(mode) && (
             <>
@@ -163,7 +227,7 @@ export function AuthForm({
             </>
           )}
           <form onSubmit={submit}>
-            {mode === "register" && (
+            {(mode === "register" || setup) && (
               <label>
                 Full name
                 <input
@@ -182,21 +246,26 @@ export function AuthForm({
                   type="email"
                   required
                   autoComplete="email"
+                  readOnly={setup}
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                 />
               </label>
             )}
-            {["login", "register", "reset", "admin"].includes(mode) && (
+            {["login", "register", "reset", "admin", "vendor"].includes(
+              mode,
+            ) && (
               <label>
                 Password
                 <input
                   type="password"
                   required
-                  minLength={mode === "register" || mode === "reset" ? 12 : 1}
+                  minLength={
+                    mode === "register" || mode === "reset" || setup ? 12 : 1
+                  }
                   maxLength={128}
                   autoComplete={
-                    mode === "register" || mode === "reset"
+                    mode === "register" || mode === "reset" || setup
                       ? "new-password"
                       : "current-password"
                   }
@@ -205,9 +274,9 @@ export function AuthForm({
                     setForm({ ...form, password: e.target.value })
                   }
                 />
-                {(mode === "register" || mode === "reset") && (
+                {mode === "register" || mode === "reset" || setup ? (
                   <small>At least 12 characters.</small>
-                )}
+                ) : null}
               </label>
             )}
             {error && (
@@ -221,26 +290,43 @@ export function AuthForm({
                 ? "Please wait…"
                 : mode === "register"
                   ? "Create account"
-                  : mode === "forgot"
-                    ? "Send reset link"
-                    : mode === "reset"
-                      ? "Update password"
-                      : mode === "verify"
-                        ? "Resend verification"
-                        : "Sign in"}
+                  : setup
+                    ? "Create vendor password"
+                    : mode === "forgot"
+                      ? "Send reset link"
+                      : mode === "reset"
+                        ? "Update password"
+                        : mode === "verify"
+                          ? "Resend verification"
+                          : "Sign in"}
             </button>
           </form>
           <div className="auth-links">
+            {invite ? (
+              <p role="status">
+                Invited to manage catalogue for {invite.vendorName}.
+              </p>
+            ) : null}
             {["forgot", "reset", "verify"].includes(mode) && (
               <Link href="/login">Back to sign in</Link>
             )}
-            <Link href={mode === "register" ? "/login" : "/register"}>
-              {mode === "register"
-                ? "Already a member? Sign in"
-                : "Create an account"}
-            </Link>
-            <Link href="/forgot-password">Forgot password?</Link>
-            <Link href="/verify-email">Verify email</Link>
+            {mode === "vendor" ? (
+              <>
+                <Link href="/login">Customer sign in</Link>
+                <Link href="/admin/login">Admin sign in</Link>
+                <Link href="/forgot-password">Forgot password?</Link>
+              </>
+            ) : (
+              <>
+                <Link href={mode === "register" ? "/login" : "/register"}>
+                  {mode === "register"
+                    ? "Already a member? Sign in"
+                    : "Create an account"}
+                </Link>
+                <Link href="/forgot-password">Forgot password?</Link>
+                <Link href="/verify-email">Verify email</Link>
+              </>
+            )}
           </div>
         </div>
       </main>

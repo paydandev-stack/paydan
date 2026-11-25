@@ -32,18 +32,19 @@ async function claim(limit: number): Promise<ClaimedMail[]> {
   return result.rows;
 }
 
-export async function retryDeadMail(limit = 25) {
+export async function retryDeadMail(limit = 25, onlyId?: string) {
   const result = await database().query(
     `WITH retryable AS (
        SELECT m.id
        FROM mail_outbox m
        WHERE m.dead_at IS NOT NULL
+         AND ($2::uuid IS NULL OR m.id=$2::uuid)
          AND NOT EXISTS (
            SELECT 1 FROM email_suppression s
            WHERE s.recipient=lower(m.recipient)
          )
        ORDER BY m.dead_at
-       LIMIT $1
+       LIMIT CASE WHEN $2::uuid IS NULL THEN LEAST($1, 50) ELSE 1 END
        FOR UPDATE SKIP LOCKED
      )
      UPDATE mail_outbox m
@@ -52,7 +53,7 @@ export async function retryDeadMail(limit = 25) {
      FROM retryable
      WHERE m.id=retryable.id
      RETURNING m.id`,
-    [Math.max(1, Math.min(limit, 50))],
+    [Math.max(1, Math.min(limit, 50)), onlyId ?? null],
   );
   return result.rows.length;
 }

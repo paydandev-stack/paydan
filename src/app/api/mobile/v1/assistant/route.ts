@@ -1,7 +1,4 @@
-import {
-  chatResponse,
-  guestAssistantKey,
-} from "@/server/assistant";
+import { chatResponse, guestAssistantKey } from "@/server/assistant";
 import {
   mobileBody,
   mobileFailure,

@@ -4,10 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
 
 export type PushCategory =
-  | "transactional"
-  | "sourcing"
-  | "support"
-  | "marketing";
+  "transactional" | "sourcing" | "support" | "marketing";
 
 export type QueuePushInput = {
   ownerId: string;

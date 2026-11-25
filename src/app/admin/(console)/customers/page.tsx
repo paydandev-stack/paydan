@@ -20,10 +20,16 @@ export default function AdminCustomersPage() {
   const { state } = useDemo();
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState("all");
+  const [tag, setTag] = useState("all");
+  const [lifecycle, setLifecycle] = useState("all");
+  const [consent, setConsent] = useState("all");
   const [visibleCount, setVisibleCount] = useState(50);
 
   const segments = [
     ...new Set(state.customers.flatMap((customer) => customer.segments)),
+  ].sort((a, b) => a.localeCompare(b));
+  const tags = [
+    ...new Set(state.customers.flatMap((customer) => customer.tags ?? [])),
   ].sort((a, b) => a.localeCompare(b));
 
   const orderCounts = new Map<string, number>();
@@ -63,9 +69,26 @@ export default function AdminCustomersPage() {
       );
     const matchesSegment =
       segment === "all" || customer.segments.includes(segment);
-    return matchesQuery && matchesSegment;
+    const matchesTag = tag === "all" || customer.tags?.includes(tag);
+    const matchesLifecycle =
+      lifecycle === "all" || (customer.lifecycleStage ?? "new") === lifecycle;
+    const matchesConsent =
+      consent === "all" ||
+      (consent === "yes"
+        ? customer.marketingConsent
+        : !customer.marketingConsent);
+    return (
+      matchesQuery &&
+      matchesSegment &&
+      matchesTag &&
+      matchesLifecycle &&
+      matchesConsent
+    );
   });
-  useEffect(() => setVisibleCount(50), [query, segment]);
+  useEffect(
+    () => setVisibleCount(50),
+    [consent, lifecycle, query, segment, tag],
+  );
   const visibleCustomers = filtered.slice(0, visibleCount);
 
   return (
@@ -78,7 +101,7 @@ export default function AdminCustomersPage() {
           "profile",
         )} in the store · ${plural(segments.length, "segment")} in use · search matches name, email and phone`}
         action={
-          <Link className="admin-btn" href="/admin/analytics">
+          <Link className="admin-btn secondary" href="/admin/analytics">
             Growth analytics
           </Link>
         }
@@ -139,6 +162,38 @@ export default function AdminCustomersPage() {
             ...segments.map((item) => ({ value: item, label: item })),
           ]}
         />
+        <AdminSelect
+          label="Tag"
+          value={tag}
+          onChange={setTag}
+          options={[
+            { value: "all", label: "All tags" },
+            ...tags.map((item) => ({ value: item, label: item })),
+          ]}
+        />
+        <AdminSelect
+          label="Lifecycle"
+          value={lifecycle}
+          onChange={setLifecycle}
+          options={[
+            { value: "all", label: "All lifecycle stages" },
+            { value: "new", label: "New" },
+            { value: "active", label: "Active" },
+            { value: "vip", label: "VIP" },
+            { value: "at_risk", label: "At risk" },
+            { value: "inactive", label: "Inactive" },
+          ]}
+        />
+        <AdminSelect
+          label="Marketing consent"
+          value={consent}
+          onChange={setConsent}
+          options={[
+            { value: "all", label: "Any consent state" },
+            { value: "yes", label: "Consented" },
+            { value: "no", label: "Not consented" },
+          ]}
+        />
       </div>
 
       {filtered.length === 0 ? (
@@ -148,8 +203,14 @@ export default function AdminCustomersPage() {
         />
       ) : (
         <AdminTable
-          template=".9fr 1.2fr .8fr 1.1fr .8fr"
-          head={["Customer", "Location", "Segment", "Joined", "Orders"]}
+          template="1.1fr .8fr 1fr .7fr .8fr"
+          head={[
+            "Customer",
+            "Lifecycle",
+            "Segments & tags",
+            "Consent",
+            "Orders",
+          ]}
           caption="Customers matching the current filters; each row opens the profile"
         >
           {visibleCustomers.map((customer) => (
@@ -168,7 +229,7 @@ export default function AdminCustomersPage() {
                 </small>
               </span>
               <span>
-                {customer.city}, {customer.state}
+                {(customer.lifecycleStage ?? "new").replaceAll("_", " ")}
               </span>
               <span className="admin-chips">
                 {customer.segments.map((item) => (
@@ -176,10 +237,13 @@ export default function AdminCustomersPage() {
                     {item}
                   </span>
                 ))}
+                {(customer.tags ?? []).map((item) => (
+                  <span className="admin-chip active" key={`tag:${item}`}>
+                    {item}
+                  </span>
+                ))}
               </span>
-              <span style={{ color: "var(--muted)" }}>
-                {formatDate(customer.joinedAt)}
-              </span>
+              <span>{customer.marketingConsent ? "Yes" : "No"}</span>
               <span style={{ textAlign: "right" }}>
                 {orderCounts.get(customer.id) ?? 0}
               </span>

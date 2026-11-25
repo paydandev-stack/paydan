@@ -1,9 +1,10 @@
-import "server-only";
+﻿import "server-only";
 
 export type MailTemplateKey =
   | "auth.verify"
   | "auth.reset"
   | "team.invite"
+  | "vendor.invite"
   | "payment.received"
   | "order.status"
   | "sourcing.received"
@@ -17,6 +18,10 @@ export type MailTemplateKey =
   | "operations.alert";
 
 export type TemplateData = Record<string, string | number | boolean | null>;
+export type TemplateOverrides = {
+  orderSubject?: string;
+  supportSubject?: string;
+};
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -59,9 +64,20 @@ function content(key: MailTemplateKey, data: TemplateData) {
         subject: "You have been invited to PAYDAN operations",
         heading: "Operations invitation",
         message:
-          "Create and verify your PAYDAN account. A super administrator will activate your assigned operations access.",
+          "Create and verify your PAYDAN account with this invited email. Your assigned operations access activates after verification.",
         cta: "Create account",
-        href: siteUrl("/register"),
+        href: String(data.url || siteUrl("/register")),
+      };
+    case "vendor.invite":
+      return {
+        subject: "Your PAYDAN vendor portal access is ready",
+        heading: "Vendor portal invitation",
+        message: String(
+          data.message ||
+            "PAYDAN has prepared vendor access for your business. Open this secure link, create your password, verify your email, then sign in to the vendor portal.",
+        ),
+        cta: "Open vendor portal",
+        href: String(data.url || siteUrl("/vendor/login")),
       };
     case "payment.received":
       return {
@@ -154,9 +170,25 @@ function content(key: MailTemplateKey, data: TemplateData) {
   }
 }
 
-export function renderMail(key: MailTemplateKey, data: TemplateData) {
+export function renderMail(
+  key: MailTemplateKey,
+  data: TemplateData,
+  overrides: TemplateOverrides = {},
+) {
   const value = content(key, data);
-  const subject = value.subject.slice(0, 240);
+  const configuredSubject =
+    key === "order.status" && overrides.orderSubject
+      ? overrides.orderSubject.replaceAll(
+          "{{reference}}",
+          String(data.reference ?? ""),
+        )
+      : key === "support.reply" && overrides.supportSubject
+        ? overrides.supportSubject.replaceAll(
+            "{{subject}}",
+            String(data.subject ?? ""),
+          )
+        : value.subject;
+  const subject = configuredSubject.slice(0, 240);
   const text = `${value.heading}\n\n${value.message}\n\n${value.cta}: ${value.href}\n\nPAYDAN — One place. More possibilities.`;
   const html = `<!doctype html><html><body style="margin:0;background:#f4f6f4;color:#10251a;font-family:Arial,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fff;border:1px solid #dbe4dd;border-radius:14px;overflow:hidden"><tr><td style="padding:24px 30px;background:#073b25;color:#fff;font-weight:800;letter-spacing:.08em">PAYDAN</td></tr><tr><td style="padding:34px 30px"><h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:30px;font-weight:500">${escapeHtml(value.heading)}</h1><p style="margin:0 0 26px;line-height:1.65;color:#42564a">${escapeHtml(value.message)}</p><a href="${escapeHtml(value.href)}" style="display:inline-block;padding:13px 20px;background:#009b4d;color:#fff;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(value.cta)}</a></td></tr><tr><td style="padding:18px 30px;border-top:1px solid #e1e8e3;color:#6b7c70;font-size:12px">PAYDAN · One place. More possibilities.</td></tr></table></td></tr></table></body></html>`;
   return { subject, text, html };

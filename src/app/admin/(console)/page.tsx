@@ -1,11 +1,13 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api-client";
 import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import { AdminTable } from "@/components/admin/data-table";
 import { StatusPill } from "@/components/status-pill";
-import { formatDate, money, plural } from "@/lib/format";
+import { formatDate, formatDateTime, money, plural } from "@/lib/format";
 import {
   fulfillmentStatusMeta,
   paymentStatusMeta,
@@ -13,8 +15,59 @@ import {
 } from "@/lib/status";
 
 /** Operations dashboard: KPI strip, latest orders, and an attention queue. */
+type OperationsHealth = {
+  deadMail: number;
+  stalePayments: number;
+  unresolvedRefunds: number;
+  launchReady: boolean | null;
+  failedUploads: number;
+};
+
 export default function AdminDashboardPage() {
   const { state } = useDemo();
+  const [health, setHealth] = useState<OperationsHealth | null>(null);
+  const [lastUpdated, setLastUpdated] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refreshHealth = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const [operations, launch] = await Promise.allSettled([
+        api<{
+          mail?: { dead?: number };
+          payments?: { pending?: number; stale?: number };
+          refunds?: { unresolved?: number };
+        }>("/api/admin/operations"),
+        api<{ ready: boolean }>("/api/admin/launch"),
+      ]);
+      const ops = operations.status === "fulfilled" ? operations.value : {};
+      let failedUploads = 0;
+      try {
+        const library = await api<{ failedUploads?: number }>(
+          "/api/media/library",
+        );
+        failedUploads = Number(library.failedUploads ?? 0);
+      } catch {
+        failedUploads = 0;
+      }
+      setHealth({
+        deadMail: Number(ops.mail?.dead ?? 0),
+        stalePayments: Number(
+          ops.payments?.stale ?? ops.payments?.pending ?? 0,
+        ),
+        unresolvedRefunds: Number(ops.refunds?.unresolved ?? 0),
+        launchReady: launch.status === "fulfilled" ? launch.value.ready : null,
+        failedUploads,
+      });
+      setLastUpdated(new Date().toISOString());
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshHealth();
+  }, [refreshHealth]);
 
   const paidRevenue = state.orders
     .filter((order) => order.paymentStatus === "paid")
@@ -74,6 +127,57 @@ export default function AdminDashboardPage() {
           </Link>
         }
       />
+
+      <div className="admin-quick-actions">
+        <Link className="admin-quick-action" href="/admin/products/new">
+          <span className="admin-quick-action-icon" aria-hidden="true">
+            ＋
+          </span>
+          <span>
+            <strong>Add a product</strong>
+            <small>Create a catalogue listing</small>
+          </span>
+        </Link>
+        <Link className="admin-quick-action" href="/admin/vendors/new">
+          <span className="admin-quick-action-icon" aria-hidden="true">
+            ◇
+          </span>
+          <span>
+            <strong>Create vendor login</strong>
+            <small>Invite a supplier account</small>
+          </span>
+        </Link>
+        <Link className="admin-quick-action" href="/admin/orders">
+          <span className="admin-quick-action-icon" aria-hidden="true">
+            ↗
+          </span>
+          <span>
+            <strong>Review orders</strong>
+            <small>Open the latest order queue</small>
+          </span>
+        </Link>
+        <Link
+          className="admin-quick-action"
+          href="/admin/inventory?attention=stock"
+        >
+          <span className="admin-quick-action-icon" aria-hidden="true">
+            ▦
+          </span>
+          <span>
+            <strong>Review stock</strong>
+            <small>Check low and blocked stock</small>
+          </span>
+        </Link>
+        <Link className="admin-quick-action" href="/admin/launch">
+          <span className="admin-quick-action-icon" aria-hidden="true">
+            ✓
+          </span>
+          <span>
+            <strong>Run launch checks</strong>
+            <small>Review release checks</small>
+          </span>
+        </Link>
+      </div>
 
       <AdminKpis
         items={[
@@ -180,23 +284,88 @@ export default function AdminDashboardPage() {
         <aside>
           <h2>Needs attention</h2>
           <div className="admin-legend">
-            <div>
+            <Link
+              className="admin-attention-link"
+              href="/admin/inventory?attention=stock"
+            >
               <span className="red">Stock to confirm</span>
               <strong>{unconfirmedStock.length}</strong>
-            </div>
-            <div>
+            </Link>
+            <Link
+              className="admin-attention-link"
+              href="/admin/procurement?urgent=true"
+            >
               <span className="orange">Urgent vendor groups</span>
               <strong>{urgentGroups.length}</strong>
-            </div>
-            <div>
+            </Link>
+            <Link
+              className="admin-attention-link"
+              href="/admin/sourcing-requests?status=awaiting_customer"
+            >
               <span className="blue">Quotes to chase</span>
               <strong>{quotesAwaiting.length}</strong>
-            </div>
-            <div>
+            </Link>
+            <Link
+              className="admin-attention-link"
+              href="/admin/products?status=draft"
+            >
               <span className="neutral">Draft products</span>
               <strong>{draftProducts.length}</strong>
-            </div>
+            </Link>
           </div>
+
+          <section className="admin-card" style={{ marginTop: "1rem" }}>
+            <div className="admin-section-title">
+              <h2 style={{ margin: 0 }}>Operations health</h2>
+              <button
+                type="button"
+                className="admin-btn quiet"
+                disabled={refreshing}
+                onClick={() => void refreshHealth()}
+              >
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
+            {health ? (
+              <div className="admin-legend">
+                <div>
+                  <span className="orange">Stale payments</span>
+                  <strong>{health.stalePayments}</strong>
+                </div>
+                <div>
+                  <span className="red">Dead mail</span>
+                  <strong>{health.deadMail}</strong>
+                </div>
+                <div>
+                  <span className="blue">Unresolved refunds</span>
+                  <strong>{health.unresolvedRefunds}</strong>
+                </div>
+                <div>
+                  <span className="neutral">Failed uploads</span>
+                  <strong>{health.failedUploads}</strong>
+                </div>
+                <div>
+                  <span className="neutral">Launch</span>
+                  <strong>
+                    {health.launchReady === null
+                      ? "—"
+                      : health.launchReady
+                        ? "Ready"
+                        : "Gated"}
+                  </strong>
+                </div>
+              </div>
+            ) : (
+              <p style={{ color: "var(--muted)", fontSize: ".66rem" }}>
+                Loading health…
+              </p>
+            )}
+            {lastUpdated ? (
+              <small style={{ color: "var(--muted)", fontSize: ".6rem" }}>
+                Updated {formatDateTime(lastUpdated)}
+              </small>
+            ) : null}
+          </section>
 
           <div className="admin-actions" style={{ marginTop: "1.2rem" }}>
             <Link className="admin-btn quiet" href="/admin/procurement">

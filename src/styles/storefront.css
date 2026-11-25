@@ -615,17 +615,36 @@
 .product-card:hover .product-image img {
   transform: scale(1.025);
 }
-.tag {
+.product-tags {
   position: absolute;
   top: 0.7rem;
   left: 0.7rem;
+  z-index: 2;
+  display: flex;
+  max-width: calc(100% - 4rem);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+.vendor-tag,
+.tag {
   padding: 0.35rem 0.5rem;
   border-radius: 2rem;
-  background: var(--orange);
-  color: var(--ink);
   font-size: 0.58rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+.vendor-tag {
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--green);
+  color: white;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag {
+  background: var(--orange);
+  color: var(--ink);
 }
 .wish {
   position: absolute;
@@ -1096,6 +1115,24 @@
 }
 
 /* Product detail additions. */
+.pdp-vendor {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0;
+  padding: 0.4rem 0.65rem;
+  border-radius: 2rem;
+  background: var(--surface);
+  color: var(--green);
+  font-size: 0.72rem;
+}
+.pdp-vendor span {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .pdp-rating {
   display: flex;
   align-items: center;

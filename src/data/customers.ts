@@ -11,6 +11,8 @@ export const customers: Customer[] = [
     state: "Lagos",
     joinedAt: "2025-11-03T09:00:00Z",
     segments: ["Repeat buyer", "Sourcing customer"],
+    tags: ["vip"],
+    marketingConsent: true,
     notes: "Prefers delivery after 5pm on weekdays.",
   },
   {
@@ -22,6 +24,8 @@ export const customers: Customer[] = [
     state: "Lagos",
     joinedAt: "2026-01-14T09:00:00Z",
     segments: ["Repeat buyer"],
+    tags: [],
+    marketingConsent: true,
     notes: "",
   },
   {
@@ -33,6 +37,8 @@ export const customers: Customer[] = [
     state: "FCT",
     joinedAt: "2026-03-22T09:00:00Z",
     segments: ["New"],
+    tags: [],
+    marketingConsent: false,
     notes: "",
   },
   {
@@ -44,6 +50,8 @@ export const customers: Customer[] = [
     state: "Rivers",
     joinedAt: "2025-12-09T09:00:00Z",
     segments: ["Repeat buyer", "High value"],
+    tags: [],
+    marketingConsent: false,
     notes: "",
   },
   {
@@ -55,6 +63,8 @@ export const customers: Customer[] = [
     state: "Kano",
     joinedAt: "2026-02-17T09:00:00Z",
     segments: ["Bulk buyer"],
+    tags: [],
+    marketingConsent: false,
     notes: "Buys bulk food items for a small catering business.",
   },
   {
@@ -66,6 +76,8 @@ export const customers: Customer[] = [
     state: "FCT",
     joinedAt: "2026-06-05T09:00:00Z",
     segments: ["New"],
+    tags: [],
+    marketingConsent: false,
     notes: "",
   },
   {
@@ -77,6 +89,8 @@ export const customers: Customer[] = [
     state: "Enugu",
     joinedAt: "2026-04-30T09:00:00Z",
     segments: ["Repeat buyer"],
+    tags: [],
+    marketingConsent: true,
     notes: "",
   },
   {
@@ -88,6 +102,8 @@ export const customers: Customer[] = [
     state: "Oyo",
     joinedAt: "2026-07-11T09:00:00Z",
     segments: ["Corporate"],
+    tags: [],
+    marketingConsent: false,
     notes: "Orders for a 12-person office on a monthly cycle.",
   },
 ];

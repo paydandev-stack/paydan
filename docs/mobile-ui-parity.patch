@@ -1,0 +1,1135 @@
+diff --git "a/src/__tests__/brand-ui.test.tsx" "b/src/__tests__/brand-ui.test.tsx"
+new file mode 100644
+index 0000000..4d1ea02
+--- /dev/null
++++ "b/src/__tests__/brand-ui.test.tsx"
+@@ -0,0 +1,30 @@
++import { fireEvent, render } from "@testing-library/react-native";
++import React from "react";
++import { BrandHeader, BrandHero, SectionHeading } from "../components/brand";
++
++describe("PAYDAN storefront brand components", () => {
++  it("renders the wordmark and a tappable header action", async () => {
++    const onAction = jest.fn();
++    const view = await render(<BrandHeader actionLabel="Account" onAction={onAction} />);
++
++    expect(view.getByText("PAYDAN")).toBeTruthy();
++    expect(view.getByText("EVERYDAY, SOURCED WITH CARE")).toBeTruthy();
++    await fireEvent.press(view.getByTestId("brand-header-action"));
++    expect(onAction).toHaveBeenCalledTimes(1);
++  });
++
++  it("uses the web hero copy and section kicker vocabulary", async () => {
++    const onExplore = jest.fn();
++    const hero = await render(<BrandHero onPress={onExplore} />);
++    expect(hero.getByText("THE PAYDAN EDIT")).toBeTruthy();
++    expect(hero.getByText("Everything you need, sourced with care.")).toBeTruthy();
++    await fireEvent.press(hero.getByTestId("hero-explore"));
++    expect(onExplore).toHaveBeenCalledTimes(1);
++
++    const section = await render(
++      <SectionHeading kicker="CURATED FOR YOU" title="Trending now" />,
++    );
++    expect(section.getByText("CURATED FOR YOU")).toBeTruthy();
++    expect(section.getByText("Trending now")).toBeTruthy();
++  });
++});
+diff --git "a/src/app/(tabs)/_layout.tsx" "b/src/app/(tabs)/_layout.tsx"
+index 17492a2..598eb63 100644
+--- "a/src/app/(tabs)/_layout.tsx"
++++ "b/src/app/(tabs)/_layout.tsx"
+@@ -1,12 +1,13 @@
+ import { Tabs } from "expo-router";
+ import React from "react";
+-import { Text } from "react-native";
++import { StyleSheet, Text, View } from "react-native";
+ import { useBootstrap } from "../../hooks/useMobileQueries";
+-import { colors } from "../../theme";
++import { colors, spacing } from "../../theme";
+
+ /**
+- * Five bottom tabs — the only top-level navigation in the buyer app.
+- * There is deliberately NO admin surface here: /admin stays web-only.
++ * Five bottom tabs, matching the web storefront's mobile navigation.
++ * The raised centre action opens Ask PAYDAN. There is deliberately NO admin
++ * surface here: /admin stays web-only.
+  */
+ export default function TabsLayout() {
+   const bootstrap = useBootstrap();
+@@ -16,32 +17,90 @@ export default function TabsLayout() {
+     <Tabs
+       screenOptions={{
+         headerShown: false,
+-        tabBarActiveTintColor: colors.greenDark,
++        tabBarActiveTintColor: colors.green,
+         tabBarInactiveTintColor: colors.muted,
++        tabBarStyle: styles.tabBar,
++        tabBarLabelStyle: styles.tabLabel,
++        tabBarItemStyle: styles.tabItem,
++        tabBarIconStyle: styles.tabIcon,
+       }}
+     >
+       <Tabs.Screen
+         name="index"
+-        options={{ title: "Home", tabBarAccessibilityLabel: "Home tab", tabBarIcon: () => <Text testID="tab-home">⌂</Text> }}
++        options={{
++          title: "Dashboard",
++          tabBarAccessibilityLabel: "Home tab",
++          tabBarIcon: () => <Text testID="tab-home" style={styles.icon}>⌂</Text>,
++        }}
+       />
+       <Tabs.Screen
+         name="departments"
+-        options={{ title: "Shop", tabBarAccessibilityLabel: "Departments tab", tabBarIcon: () => <Text testID="tab-departments">▦</Text> }}
++        options={{
++          title: "Departments",
++          tabBarAccessibilityLabel: "Departments tab",
++          tabBarIcon: () => <Text testID="tab-departments" style={styles.icon}>▦</Text>,
++        }}
+       />
+       <Tabs.Screen
+         name="assistant"
+         options={{
+-          title: "Ask PAYDAN",
++          title: "Ask",
+           tabBarAccessibilityLabel: "Ask PAYDAN tab",
+-          tabBarIcon: () => <Text testID="tab-assistant">✦</Text>,
++          tabBarIcon: () => (
++            <View testID="tab-assistant" style={styles.askIcon}>
++              <Text style={styles.askGlyph}>✦</Text>
++            </View>
++          ),
+           href: assistantEnabled ? undefined : null,
+         }}
+       />
+-      <Tabs.Screen name="cart" options={{ title: "Cart", tabBarAccessibilityLabel: "Cart tab", tabBarIcon: () => <Text testID="tab-cart">▣</Text> }} />
++      <Tabs.Screen
++        name="cart"
++        options={{
++          title: "Cart",
++          tabBarAccessibilityLabel: "Cart tab",
++          tabBarIcon: () => <Text testID="tab-cart" style={styles.icon}>▣</Text>,
++        }}
++      />
+       <Tabs.Screen
+         name="account"
+-        options={{ title: "Account", tabBarAccessibilityLabel: "Account tab", tabBarIcon: () => <Text testID="tab-account">◉</Text> }}
++        options={{
++          title: "Account",
++          tabBarAccessibilityLabel: "Account tab",
++          tabBarIcon: () => <Text testID="tab-account" style={styles.icon}>◉</Text>,
++        }}
+       />
+     </Tabs>
+   );
+ }
++
++const styles = StyleSheet.create({
++  tabBar: {
++    height: 72,
++    paddingTop: spacing.xs,
++    borderTopWidth: 1,
++    borderTopColor: colors.border,
++    backgroundColor: colors.white,
++  },
++  tabItem: { paddingTop: 4 },
++  tabIcon: { marginBottom: 2 },
++  tabLabel: { fontSize: 10, fontWeight: "700" },
++  icon: { color: colors.muted, fontSize: 22, lineHeight: 24 },
++  askIcon: {
++    width: 42,
++    height: 42,
++    marginTop: -18,
++    borderRadius: 21,
++    borderWidth: 4,
++    borderColor: colors.white,
++    backgroundColor: colors.greenDeep,
++    alignItems: "center",
++    justifyContent: "center",
++    shadowColor: colors.greenDeep,
++    shadowOffset: { width: 0, height: 5 },
++    shadowOpacity: 0.25,
++    shadowRadius: 8,
++    elevation: 6,
++  },
++  askGlyph: { color: colors.orange, fontSize: 18, fontWeight: "800" },
++});
+diff --git "a/src/app/(tabs)/departments.tsx" "b/src/app/(tabs)/departments.tsx"
+index db21c76..b36a911 100644
+--- "a/src/app/(tabs)/departments.tsx"
++++ "b/src/app/(tabs)/departments.tsx"
+@@ -6,7 +6,8 @@ import { useCatalog, useDepartments } from "../../hooks/useMobileQueries";
+ import { useAuth } from "../../providers/AuthProvider";
+ import { colors, fontSize, radius, spacing } from "../../theme";
+ import { ProductCard } from "../../components/catalog";
+-import { EmptyState, Heading, Loading, Screen } from "../../ui";
++import { BrandHeader, SectionHeading } from "../../components/brand";
++import { EmptyState, Loading, Screen } from "../../ui";
+
+ export default function DepartmentsScreen() {
+   const router = useRouter();
+@@ -41,52 +42,67 @@ export default function DepartmentsScreen() {
+
+   return (
+     <Screen scroll>
+-      <Heading title="Departments" subtitle="Browse the catalogue by department" />
++      <BrandHeader
++        actionLabel="Cart"
++        onAction={() => router.push("/(tabs)/cart")}
++      />
++      <SectionHeading
++        kicker="THE FULL CATALOGUE"
++        title="Everything on PAYDAN"
++        description="Every published product across the storefront. Sign in to view current prices and shop."
++      />
+       <TextInput
+         value={query}
+         onChangeText={setQuery}
+-        placeholder="Search products"
++        placeholder="Search products, brands and departments"
+         placeholderTextColor={colors.muted}
+         autoCapitalize="none"
+         accessibilityLabel="Search products"
+         testID="department-search"
+         style={styles.search}
+       />
+-      <View style={styles.chips}>
+-        <DepartmentChip label="All" testID="department-chip-all" active={activeSlug === null} onPress={() => setSlugOverride(null)} />
+-        {(departments.data?.departments ?? []).map((department) => (
+-          <DepartmentChip
+-            key={department.slug}
+-            testID={"department-chip-" + department.slug}
+-            label={department.name}
+-            active={activeSlug === department.slug}
+-            onPress={() => setSlugOverride(department.slug)}
+-          />
+-        ))}
++      <View style={styles.filterGroup}>
++        <Text style={styles.filterTitle}>Department</Text>
++        <View style={styles.chips}>
++          <DepartmentChip label="All" testID="department-chip-all" active={activeSlug === null} onPress={() => setSlugOverride(null)} />
++          {(departments.data?.departments ?? []).map((department) => (
++            <DepartmentChip
++              key={department.slug}
++              testID={"department-chip-" + department.slug}
++              label={department.name}
++              active={activeSlug === department.slug}
++              onPress={() => setSlugOverride(department.slug)}
++            />
++          ))}
++        </View>
+       </View>
+-      <Text style={styles.filterTitle}>Collection</Text>
+-      <View style={styles.chips}>
+-        {(["all", "featured", "new-arrivals", "deals"] as const).map((value) => (
+-          <DepartmentChip
+-            key={value}
+-            label={value === "new-arrivals" ? "New arrivals" : value}
+-            testID={"collection-chip-" + value}
+-            active={collection === value}
+-            onPress={() => setCollection(value)}
+-          />
+-        ))}
++      <View style={styles.filterGroup}>
++        <Text style={styles.filterTitle}>Collection</Text>
++        <View style={styles.chips}>
++          {(["all", "featured", "new-arrivals", "deals"] as const).map((value) => (
++            <DepartmentChip
++              key={value}
++              label={value === "new-arrivals" ? "New arrivals" : value === "all" ? "All" : value}
++              testID={"collection-chip-" + value}
++              active={collection === value}
++              onPress={() => setCollection(value)}
++            />
++          ))}
++        </View>
+       </View>
+-      <Text style={styles.filterTitle}>Sort</Text>
+-      <View style={styles.chips}>
+-        {sorts.map((value) => (
+-          <DepartmentChip
+-            key={value}
+-            label={value.replace("-", " ")}
+-            testID={"sort-chip-" + value}
+-            active={sort === value}
+-            onPress={() => setSortOverride(value)}
+-          />
+-        ))}
++      <View style={styles.filterGroup}>
++        <Text style={styles.filterTitle}>Sort</Text>
++        <View style={styles.chips}>
++          {sorts.map((value) => (
++            <DepartmentChip
++              key={value}
++              label={sortLabels[value]}
++              testID={"sort-chip-" + value}
++              active={sort === value}
++              onPress={() => setSortOverride(value)}
++            />
++          ))}
++        </View>
+       </View>
+       {!user ? (
+         <Text style={styles.hint}>Sign in to sort by price.</Text>
+@@ -105,7 +121,7 @@ export default function DepartmentsScreen() {
+               <ProductCard
+                 product={product}
+                 pricesVisible={Boolean(user)}
+-      onPress={() => router.push(asHref("/product/" + encodeURIComponent(product.slug)))}
++                onPress={() => router.push(asHref("/product/" + encodeURIComponent(product.slug)))}
+               />
+             </View>
+           ))}
+@@ -115,6 +131,14 @@ export default function DepartmentsScreen() {
+   );
+ }
+
++const sortLabels = {
++  featured: "Recommended",
++  newest: "Newest first",
++  name: "Name A–Z",
++  "price-asc": "Price: low to high",
++  "price-desc": "Price: high to low",
++} as const;
++
+ function DepartmentChip({ label, testID, active, onPress }: { label: string; testID?: string; active: boolean; onPress: () => void }) {
+   return (
+     <Pressable
+@@ -131,11 +155,38 @@ function DepartmentChip({ label, testID, active, onPress }: { label: string; tes
+ }
+
+ const styles = StyleSheet.create({
+-  search: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, color: colors.ink, backgroundColor: colors.surface, marginBottom: spacing.md, minHeight: 48 },
+-  filterTitle: { fontSize: fontSize.sm, fontWeight: "700", color: colors.ink, marginBottom: spacing.xs },
+-  hint: { fontSize: fontSize.xs, color: colors.muted, marginBottom: spacing.md },
+-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md },
+-  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: 44, justifyContent: "center" },
++  search: {
++    minHeight: 50,
++    paddingHorizontal: spacing.md,
++    borderRadius: radius.md,
++    borderWidth: 1,
++    borderColor: colors.border,
++    color: colors.ink,
++    backgroundColor: colors.surface,
++    marginBottom: spacing.lg,
++  },
++  filterGroup: {
++    marginBottom: spacing.md,
++  },
++  filterTitle: {
++    color: colors.ink,
++    fontSize: fontSize.sm,
++    fontWeight: "800",
++    marginBottom: spacing.sm,
++  },
++  hint: { color: colors.muted, fontSize: fontSize.xs, marginBottom: spacing.md },
++  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
++  chip: {
++    minHeight: 42,
++    paddingHorizontal: spacing.md,
++    paddingVertical: spacing.sm,
++    borderRadius: 999,
++    borderWidth: 1,
++    borderColor: colors.border,
++    backgroundColor: colors.white,
++    alignItems: "center",
++    justifyContent: "center",
++  },
+   chipActive: { backgroundColor: colors.greenDark, borderColor: colors.greenDark },
+   chipText: { color: colors.ink, fontWeight: "700", fontSize: fontSize.sm },
+   chipTextActive: { color: colors.white },
+diff --git "a/src/app/(tabs)/index.tsx" "b/src/app/(tabs)/index.tsx"
+index a5e8336..62f47cf 100644
+--- "a/src/app/(tabs)/index.tsx"
++++ "b/src/app/(tabs)/index.tsx"
+@@ -1,19 +1,40 @@
+ import { useRouter } from "expo-router";
+-import { Pressable, StyleSheet, Text, View } from "react-native";
++import { useState } from "react";
++import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+ import { asHref } from "../../navigation";
+-import { useCatalog, useDepartments } from "../../hooks/useMobileQueries";
++import {
++  useCartState,
++  useCatalog,
++  useDepartments,
++  useSourcing,
++  useWishlist,
++} from "../../hooks/useMobileQueries";
+ import { useAuth } from "../../providers/AuthProvider";
+ import { colors, fontSize, radius, spacing } from "../../theme";
+ import { ProductCard } from "../../components/catalog";
+-import { EmptyState, Heading, Loading, PrimaryButton, Screen, SecondaryButton } from "../../ui";
++import {
++  BrandHeader,
++  BrandHero,
++  Kicker,
++  SectionHeading,
++  ShortcutCard,
++} from "../../components/brand";
++import type { MobileCatalogProduct } from "../../types";
++import { EmptyState, Loading, Screen } from "../../ui";
+
+ /** Guest discovery and the signed-in dashboard share one price-safe catalog. */
+ export default function HomeScreen() {
+   const router = useRouter();
+   const { user, ready } = useAuth();
+-  const catalog = useCatalog({ limit: 12 });
+-  const departments = useDepartments();
++  const [activeSlug, setActiveSlug] = useState<string | null>(null);
++  const [departmentOpen, setDepartmentOpen] = useState(false);
+   const signedIn = Boolean(user);
++  const firstName = user?.name.split(" ")[0] ?? "there";
++  const catalog = useCatalog({ limit: 12, department: activeSlug ?? undefined });
++  const departments = useDepartments();
++  const cart = useCartState(signedIn);
++  const wishlist = useWishlist();
++  const sourcing = useSourcing();
+
+   if (!ready) {
+     return (
+@@ -23,71 +44,337 @@ export default function HomeScreen() {
+     );
+   }
+
+-  return (
+-    <Screen scroll>
+-      <Heading
+-        title={signedIn ? "Welcome back" : "Welcome to PAYDAN"}
+-        subtitle={signedIn ? "Today's picks for you" : "Browse without prices until you sign in"}
+-      />
+-      {!signedIn ? (
+-        <View style={styles.actions}>
+-          <PrimaryButton label="Sign in" onPress={() => router.push("/auth/login")} />
+-          <SecondaryButton label="Create account" onPress={() => router.push("/auth/signup")} />
+-        </View>
+-      ) : null}
++  const departmentName =
++    (departments.data?.departments ?? []).find((item) => item.slug === activeSlug)
++      ?.name ?? "For you";
+
+-      <Text style={styles.sectionTitle}>Departments</Text>
+-      <View style={styles.chips}>
+-        {(departments.data?.departments ?? []).slice(0, 8).map((department) => (
+-          <Pressable
+-            key={department.slug}
+-            style={styles.chip}
+-        onPress={() =>
+-          router.push(asHref("/(tabs)/departments?slug=" + encodeURIComponent(department.slug)))
+-        }
+-            accessibilityRole="button"
+-            accessibilityLabel={"Open " + department.name}
+-          >
+-            <Text style={styles.chipText}>{department.name}</Text>
+-          </Pressable>
+-        ))}
+-      </View>
++  function openProduct(product: MobileCatalogProduct) {
++    router.push(asHref("/product/" + encodeURIComponent(product.slug)));
++  }
+
+-      <Text style={styles.sectionTitle}>Featured products</Text>
+-      {catalog.isPending ? (
+-        <Loading label="Loading products..." />
+-      ) : catalog.isError ? (
++  function renderProducts() {
++    if (catalog.isPending) return <Loading label="Loading products..." />;
++    if (catalog.isError)
++      return (
+         <EmptyState
+           title="Could not load products"
+           message="Check your connection and try again."
+           actionLabel="Retry"
+           onAction={() => catalog.refetch()}
+         />
+-      ) : (catalog.data?.products.length ?? 0) === 0 ? (
+-        <EmptyState title="No products yet" message="New catalogue items will appear here." />
+-      ) : (
+-        <View style={styles.grid}>
+-          {catalog.data?.products.map((product) => (
+-            <View key={product.id} style={styles.gridItem}>
+-              <ProductCard
+-                product={product}
+-                pricesVisible={signedIn}
+-      onPress={() => router.push(asHref("/product/" + encodeURIComponent(product.slug)))}
+-              />
+-            </View>
++      );
++    if ((catalog.data?.products.length ?? 0) === 0)
++      return (
++        <EmptyState
++          title="No products yet"
++          message="New catalogue items will appear here."
++        />
++      );
++    return (
++      <View style={styles.grid}>
++        {catalog.data?.products.map((product) => (
++          <View key={product.id} style={styles.gridItem}>
++            <ProductCard
++              product={product}
++              pricesVisible={signedIn}
++              onPress={() => openProduct(product)}
++            />
++          </View>
++        ))}
++      </View>
++    );
++  }
++
++  if (!signedIn) {
++    return (
++      <Screen scroll>
++        <BrandHeader
++          actionLabel="Sign in"
++          onAction={() => router.push("/auth/login")}
++        />
++        <BrandHero onPress={() => router.push("/(tabs)/departments")} />
++        <SectionHeading
++          kicker="SHOP YOUR WAY"
++          title="Explore departments"
++          actionLabel="View all"
++          onAction={() => router.push("/(tabs)/departments")}
++        />
++        <View style={styles.departmentGrid}>
++          {(departments.data?.departments ?? []).slice(0, 8).map((department, index) => (
++            <Pressable
++              key={department.slug}
++              style={styles.departmentCard}
++              onPress={() =>
++                router.push(
++                  asHref("/(tabs)/departments?slug=" + encodeURIComponent(department.slug)),
++                )
++              }
++              accessibilityRole="button"
++              accessibilityLabel={"Open " + department.name}
++            >
++              <Text style={styles.departmentNumber}>
++                {String(index + 1).padStart(2, "0")}
++              </Text>
++              <Text style={styles.departmentName}>{department.name}</Text>
++              <Text style={styles.departmentArrow}>→</Text>
++            </Pressable>
+           ))}
+         </View>
+-      )}
++        <SectionHeading
++          kicker="CURATED FOR YOU"
++          title="Trending now"
++          description="Browse the catalogue freely. Sign in to view member prices."
++        />
++        {renderProducts()}
++        <View style={styles.guestFooter}>
++          <SectionHeading
++            kicker="NEW HERE?"
++            title="Buy with confidence"
++            description="One cart, clear updates, and a team that coordinates every order."
++          />
++          <Pressable
++            style={styles.footerButton}
++            onPress={() => router.push("/auth/signup")}
++            accessibilityRole="button"
++            accessibilityLabel="Create account"
++          >
++            <Text style={styles.footerButtonText}>Create your account →</Text>
++          </Pressable>
++        </View>
++      </Screen>
++    );
++  }
++
++  return (
++    <Screen scroll>
++      <BrandHeader
++        actionLabel="Account"
++        onAction={() => router.push("/(tabs)/account")}
++      />
++      <View style={styles.welcome}>
++        <Kicker>YOUR PAYDAN</Kicker>
++        <Text style={styles.welcomeTitle}>Hello, {firstName}.</Text>
++        <Text style={styles.welcomeCopy}>A little inspiration for your everyday.</Text>
++      </View>
++
++      <View style={styles.shortcuts}>
++        <ShortcutCard
++          value={cart.data?.cart.reduce((sum, line) => sum + line.quantity, 0) ?? 0}
++          label="In your cart"
++          testID="home-shortcut-cart"
++          onPress={() => router.push("/(tabs)/cart")}
++        />
++        <ShortcutCard
++          value={wishlist.data?.wishlist.length ?? 0}
++          label="Saved finds"
++          testID="home-shortcut-wishlist"
++          onPress={() => router.push("/account/wishlist")}
++        />
++        <ShortcutCard
++          value={sourcing.data?.sourcing.length ?? 0}
++          label="Sourcing requests"
++          testID="home-shortcut-sourcing"
++          onPress={() => router.push("/sourcing")}
++        />
++        <ShortcutCard
++          value="→"
++          label="Your orders"
++          testID="home-shortcut-orders"
++          onPress={() => router.push("/orders")}
++        />
++      </View>
++
++      <SectionHeading
++        kicker="FIND YOUR NEXT FAVOURITE"
++        title="Selected for your everyday"
++        actionLabel="View all"
++        onAction={() => router.push("/(tabs)/departments")}
++      />
++      <Pressable
++        style={styles.departmentSelect}
++        onPress={() => setDepartmentOpen(true)}
++        accessibilityRole="button"
++        accessibilityLabel="Choose a department"
++        testID="home-department-select"
++      >
++        <View>
++          <Text style={styles.departmentSelectLabel}>Find your department</Text>
++          <Text style={styles.departmentSelectValue}>{departmentName}</Text>
++        </View>
++        <Text style={styles.departmentSelectArrow}>⌄</Text>
++      </Pressable>
++      {renderProducts()}
++
++      <View style={styles.sourcingCard}>
++        <SectionHeading
++          kicker="PAYDAN SOURCING"
++          title="Something specific in mind?"
++          description="Ask our team to find the products you cannot see in the catalogue."
++        />
++        <Pressable
++          style={styles.sourcingButton}
++          onPress={() => router.push("/sourcing/new")}
++          accessibilityRole="button"
++          accessibilityLabel="Request a product"
++        >
++          <Text style={styles.sourcingButtonText}>Request a product →</Text>
++        </Pressable>
++      </View>
++
++      <Modal
++        visible={departmentOpen}
++        animationType="slide"
++        transparent
++        onRequestClose={() => setDepartmentOpen(false)}
++      >
++        <Pressable
++          style={styles.sheetBackdrop}
++          onPress={() => setDepartmentOpen(false)}
++          accessibilityRole="button"
++          accessibilityLabel="Close departments"
++        >
++          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
++            <View style={styles.sheetHead}>
++              <Text style={styles.sheetTitle}>Choose a department</Text>
++              <Pressable
++                onPress={() => setDepartmentOpen(false)}
++                accessibilityRole="button"
++                accessibilityLabel="Close departments"
++                style={styles.sheetClose}
++              >
++                <Text style={styles.sheetCloseText}>×</Text>
++              </Pressable>
++            </View>
++            <Pressable
++              style={[styles.sheetOption, activeSlug === null && styles.sheetOptionActive]}
++              onPress={() => {
++                setActiveSlug(null);
++                setDepartmentOpen(false);
++              }}
++            >
++              <Text style={styles.sheetOptionText}>For you</Text>
++              <Text style={styles.sheetOptionMeta}>Personal picks</Text>
++            </Pressable>
++            {(departments.data?.departments ?? []).map((department) => (
++              <Pressable
++                key={department.slug}
++                style={[
++                  styles.sheetOption,
++                  activeSlug === department.slug && styles.sheetOptionActive,
++                ]}
++                onPress={() => {
++                  setActiveSlug(department.slug);
++                  setDepartmentOpen(false);
++                }}
++              >
++                <Text style={styles.sheetOptionText}>{department.name}</Text>
++                <Text style={styles.sheetOptionMeta}>Browse department →</Text>
++              </Pressable>
++            ))}
++          </View>
++        </Pressable>
++      </Modal>
+     </Screen>
+   );
+ }
+
+ const styles = StyleSheet.create({
+-  actions: { gap: spacing.sm, marginBottom: spacing.lg },
+-  sectionTitle: { fontSize: fontSize.lg, fontWeight: "800", color: colors.ink, marginTop: spacing.md, marginBottom: spacing.sm },
+-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+-  chip: { backgroundColor: colors.greenSoft, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: 44, justifyContent: "center" },
+-  chipText: { color: colors.greenDark, fontWeight: "700", fontSize: fontSize.sm },
++  welcome: { marginBottom: spacing.lg },
++  welcomeTitle: { color: colors.ink, fontSize: 30, fontWeight: "800", letterSpacing: -0.6 },
++  welcomeCopy: { color: colors.muted, fontSize: fontSize.md, marginTop: spacing.xs },
++  shortcuts: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.lg },
++  departmentSelect: {
++    minHeight: 56,
++    paddingHorizontal: spacing.md,
++    borderRadius: radius.md,
++    borderWidth: 1,
++    borderColor: colors.border,
++    backgroundColor: colors.white,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++    marginBottom: spacing.md,
++  },
++  departmentSelectLabel: { color: colors.muted, fontSize: fontSize.xs, fontWeight: "700" },
++  departmentSelectValue: { color: colors.ink, fontSize: fontSize.md, fontWeight: "800", marginTop: 2 },
++  departmentSelectArrow: { color: colors.greenDark, fontSize: 24, fontWeight: "700" },
+   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+   gridItem: { width: "47%", flexGrow: 1 },
++  departmentGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
++  departmentCard: {
++    width: "47%",
++    flexGrow: 1,
++    minHeight: 76,
++    padding: spacing.md,
++    borderWidth: 1,
++    borderColor: colors.border,
++    borderRadius: radius.md,
++    backgroundColor: colors.white,
++  },
++  departmentNumber: { color: colors.orange, fontSize: 10, fontWeight: "900", letterSpacing: 1 },
++  departmentName: { color: colors.ink, fontSize: fontSize.sm, fontWeight: "800", marginTop: spacing.sm },
++  departmentArrow: { position: "absolute", right: spacing.md, bottom: spacing.md, color: colors.green, fontSize: fontSize.lg },
++  guestFooter: {
++    marginTop: spacing.xl,
++    padding: spacing.lg,
++    borderRadius: radius.lg,
++    backgroundColor: colors.greenSoft,
++  },
++  footerButton: {
++    minHeight: 46,
++    borderRadius: radius.sm,
++    backgroundColor: colors.greenDark,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  footerButtonText: { color: colors.white, fontSize: fontSize.sm, fontWeight: "800" },
++  sourcingCard: {
++    marginTop: spacing.xl,
++    padding: spacing.lg,
++    borderWidth: 1,
++    borderColor: colors.border,
++    borderRadius: radius.lg,
++    backgroundColor: colors.cream,
++  },
++  sourcingButton: {
++    minHeight: 44,
++    borderRadius: radius.sm,
++    backgroundColor: colors.orange,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  sourcingButtonText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: "800" },
++  sheetBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(5,25,15,0.48)" },
++  sheet: {
++    maxHeight: "82%",
++    paddingBottom: spacing.xl,
++    borderTopLeftRadius: 18,
++    borderTopRightRadius: 18,
++    backgroundColor: colors.white,
++  },
++  sheetHead: {
++    minHeight: 58,
++    paddingHorizontal: spacing.lg,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++    borderBottomWidth: 1,
++    borderBottomColor: colors.border,
++  },
++  sheetTitle: { color: colors.ink, fontSize: fontSize.lg, fontWeight: "800" },
++  sheetClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" },
++  sheetCloseText: { color: colors.ink, fontSize: 22 },
++  sheetOption: {
++    minHeight: 58,
++    marginHorizontal: spacing.sm,
++    marginTop: spacing.xs,
++    paddingHorizontal: spacing.md,
++    borderRadius: radius.md,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++  },
++  sheetOptionActive: { backgroundColor: colors.greenSoft },
++  sheetOptionText: { color: colors.ink, fontSize: fontSize.md, fontWeight: "700" },
++  sheetOptionMeta: { color: colors.muted, fontSize: fontSize.xs },
+ });
+diff --git "a/src/components/brand.tsx" "b/src/components/brand.tsx"
+new file mode 100644
+index 0000000..44ea29e
+--- /dev/null
++++ "b/src/components/brand.tsx"
+@@ -0,0 +1,223 @@
++import React from "react";
++import { Pressable, StyleSheet, Text, View } from "react-native";
++import { colors, fontSize, radius, spacing } from "../theme";
++
++/** Storefront-style brand header built from native primitives (no binary asset). */
++export function BrandHeader({
++  actionLabel,
++  onAction,
++}: {
++  actionLabel?: string;
++  onAction?: () => void;
++}) {
++  return (
++    <View style={styles.header}>
++      <View>
++        <Text style={styles.wordmark} accessibilityRole="header">
++          PAYDAN
++        </Text>
++        <View style={styles.wordmarkUnderline} />
++        <Text style={styles.tagline}>EVERYDAY, SOURCED WITH CARE</Text>
++      </View>
++      {actionLabel && onAction ? (
++        <Pressable
++          onPress={onAction}
++          accessibilityRole="button"
++          accessibilityLabel={actionLabel}
++          testID="brand-header-action"
++          style={styles.headerAction}
++        >
++          <Text style={styles.headerActionText}>{actionLabel}</Text>
++        </Pressable>
++      ) : null}
++    </View>
++  );
++}
++
++export function Kicker({
++  children,
++  tone = "green",
++}: {
++  children: React.ReactNode;
++  tone?: "green" | "orange";
++}) {
++  return (
++    <Text style={[styles.kicker, tone === "orange" ? styles.kickerOrange : styles.kickerGreen]}>
++      {children}
++    </Text>
++  );
++}
++
++export function BrandHero({ onPress }: { onPress: () => void }) {
++  return (
++    <View style={styles.hero}>
++      <Kicker tone="orange">THE PAYDAN EDIT</Kicker>
++      <Text style={styles.heroTitle}>Everything you need, sourced with care.</Text>
++      <Text style={styles.heroCopy}>
++        Shop everyday essentials, standout technology and fresh finds through one trusted storefront.
++      </Text>
++      <Pressable
++        onPress={onPress}
++        accessibilityRole="button"
++        accessibilityLabel="Explore the collection"
++        testID="hero-explore"
++        style={styles.heroButton}
++      >
++        <Text style={styles.heroButtonText}>Explore the collection</Text>
++        <Text style={styles.heroArrow}>→</Text>
++      </Pressable>
++    </View>
++  );
++}
++
++export function SectionHeading({
++  kicker,
++  title,
++  description,
++  actionLabel,
++  onAction,
++}: {
++  kicker?: string;
++  title: string;
++  description?: string;
++  actionLabel?: string;
++  onAction?: () => void;
++}) {
++  return (
++    <View style={styles.sectionHeading}>
++      <View style={styles.sectionCopy}>
++        {kicker ? <Kicker>{kicker}</Kicker> : null}
++        <Text style={styles.sectionTitle} accessibilityRole="header">
++          {title}
++        </Text>
++        {description ? <Text style={styles.sectionDescription}>{description}</Text> : null}
++      </View>
++      {actionLabel && onAction ? (
++        <Pressable
++          onPress={onAction}
++          accessibilityRole="button"
++          accessibilityLabel={actionLabel}
++          style={styles.sectionAction}
++        >
++          <Text style={styles.sectionActionText}>{actionLabel} →</Text>
++        </Pressable>
++      ) : null}
++    </View>
++  );
++}
++
++export function ShortcutCard({
++  value,
++  label,
++  onPress,
++  testID,
++}: {
++  value: string | number;
++  label: string;
++  onPress: () => void;
++  testID?: string;
++}) {
++  return (
++    <Pressable
++      onPress={onPress}
++      testID={testID}
++      accessibilityRole="button"
++      accessibilityLabel={label}
++      style={styles.shortcut}
++    >
++      <Text style={styles.shortcutValue}>{value}</Text>
++      <Text style={styles.shortcutLabel}>{label}</Text>
++    </Pressable>
++  );
++}
++
++const styles = StyleSheet.create({
++  header: {
++    flexDirection: "row",
++    alignItems: "flex-start",
++    justifyContent: "space-between",
++    marginBottom: spacing.xl,
++  },
++  wordmark: {
++    color: colors.greenDark,
++    fontSize: 27,
++    fontWeight: "900",
++    letterSpacing: -0.8,
++    lineHeight: 30,
++  },
++  wordmarkUnderline: {
++    width: 78,
++    height: 3,
++    marginTop: 1,
++    borderRadius: 2,
++    backgroundColor: colors.orange,
++  },
++  tagline: {
++    marginTop: 6,
++    color: colors.muted,
++    fontSize: 9,
++    fontWeight: "700",
++    letterSpacing: 1.2,
++  },
++  headerAction: {
++    minHeight: 40,
++    paddingHorizontal: spacing.md,
++    borderRadius: radius.md,
++    borderWidth: 1,
++    borderColor: colors.border,
++    backgroundColor: colors.white,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  headerActionText: { color: colors.greenDark, fontSize: fontSize.sm, fontWeight: "800" },
++  kicker: { fontSize: 10, fontWeight: "900", letterSpacing: 1.6, marginBottom: spacing.sm },
++  kickerGreen: { color: colors.green },
++  kickerOrange: { color: colors.orange },
++  hero: {
++    borderRadius: radius.lg,
++    backgroundColor: colors.greenDeep,
++    padding: spacing.xl,
++    marginBottom: spacing.xl,
++  },
++  heroTitle: { color: colors.white, fontSize: 27, fontWeight: "700", lineHeight: 31, letterSpacing: -0.4 },
++  heroCopy: { color: "#e6f0e9", fontSize: fontSize.sm, lineHeight: 20, marginTop: spacing.md },
++  heroButton: {
++    minHeight: 46,
++    marginTop: spacing.lg,
++    paddingHorizontal: spacing.lg,
++    borderRadius: radius.sm,
++    backgroundColor: colors.orange,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "center",
++    gap: spacing.sm,
++    alignSelf: "flex-start",
++  },
++  heroButtonText: { color: colors.ink, fontSize: fontSize.sm, fontWeight: "800" },
++  heroArrow: { color: colors.ink, fontSize: fontSize.lg, fontWeight: "800" },
++  sectionHeading: {
++    flexDirection: "row",
++    alignItems: "flex-end",
++    justifyContent: "space-between",
++    gap: spacing.md,
++    marginTop: spacing.lg,
++    marginBottom: spacing.md,
++  },
++  sectionCopy: { flex: 1 },
++  sectionTitle: { color: colors.ink, fontSize: 23, fontWeight: "800", letterSpacing: -0.3 },
++  sectionDescription: { color: colors.muted, fontSize: fontSize.sm, lineHeight: 19, marginTop: spacing.xs },
++  sectionAction: { paddingVertical: spacing.xs },
++  sectionActionText: { color: colors.greenDark, fontSize: fontSize.sm, fontWeight: "800" },
++  shortcut: {
++    flex: 1,
++    minHeight: 82,
++    padding: spacing.md,
++    borderWidth: 1,
++    borderColor: colors.border,
++    borderRadius: radius.md,
++    backgroundColor: colors.white,
++  },
++  shortcutValue: { color: colors.green, fontSize: 22, fontWeight: "800" },
++  shortcutLabel: { color: colors.ink, fontSize: fontSize.sm, fontWeight: "700", marginTop: spacing.xs },
++});
++
+diff --git "a/src/components/catalog.tsx" "b/src/components/catalog.tsx"
+index 588ce8d..b6f439f 100644
+--- "a/src/components/catalog.tsx"
++++ "b/src/components/catalog.tsx"
+@@ -24,6 +24,12 @@ export function ProductCard({
+   const wishlist = useWishlist();
+   const wishMut = useWishlistMutation();
+   const wished = wishlist.data?.wishlist.includes(product.id) ?? false;
++  const discount =
++    product.price !== undefined &&
++    product.compareAt !== undefined &&
++    product.compareAt > product.price
++      ? Math.round((1 - product.price / product.compareAt) * 100)
++      : null;
+
+   return (
+     <Pressable
+@@ -33,11 +39,33 @@ export function ProductCard({
+       accessibilityRole="button"
+       accessibilityLabel={"Open " + product.name}
+     >
+-      {product.images[0] ? (
+-        <Image source={{ uri: product.images[0] }} style={styles.image} contentFit="cover" />
+-      ) : (
+-        <View style={[styles.image, styles.placeholder]} />
+-      )}
++      <View style={styles.imageWrap}>
++        {product.images[0] ? (
++          <Image source={{ uri: product.images[0] }} style={styles.image} contentFit="cover" />
++        ) : (
++          <View style={[styles.image, styles.placeholder]} />
++        )}
++        {pricesVisible && discount ? (
++          <View style={styles.discountBadge}>
++            <Text style={styles.discountText}>-{discount}%</Text>
++          </View>
++        ) : null}
++        {user ? (
++          <Pressable
++            onPress={() => wishMut.mutate({ productId: product.id })}
++            testID={"wishlist-toggle-" + product.id}
++            accessibilityRole="button"
++            accessibilityLabel={wished ? "Remove from wishlist" : "Add to wishlist"}
++            accessibilityState={{ selected: wished }}
++            hitSlop={12}
++            style={styles.wishButton}
++          >
++            <Text style={[styles.wishIcon, wished && styles.wishIconActive]}>
++              {wished ? "♥" : "♡"}
++            </Text>
++          </Pressable>
++        ) : null}
++      </View>
+       <View style={styles.body}>
+         <Text style={styles.brand} numberOfLines={1}>
+           {product.brand}
+@@ -60,19 +88,9 @@ export function ProductCard({
+           </Link>
+         )}
+         <View style={styles.row}>
+-          <Text style={styles.stock}>{stockLabel(product.availability)}</Text>
+-          {user ? (
+-            <Pressable
+-              onPress={() => wishMut.mutate({ productId: product.id })}
+-              testID={"wishlist-toggle-" + product.id}
+-              accessibilityRole="button"
+-              accessibilityLabel={wished ? "Remove from wishlist" : "Add to wishlist"}
+-              accessibilityState={{ selected: wished }}
+-              hitSlop={12}
+-            >
+-              <Text style={styles.heart}>{wished ? "♥" : "♡"}</Text>
+-            </Pressable>
+-          ) : null}
++          <View style={styles.stockPill}>
++            <Text style={styles.stock}>{stockLabel(product.availability)}</Text>
++          </View>
+         </View>
+       </View>
+     </Pressable>
+@@ -189,18 +207,42 @@ const styles = StyleSheet.create({
+     borderRadius: radius.md,
+     overflow: "hidden",
+   },
+-  image: { width: "100%", aspectRatio: 1, backgroundColor: colors.surface },
++  imageWrap: { position: "relative", width: "100%", aspectRatio: 4 / 4.15, backgroundColor: colors.surface },
++  image: { width: "100%", height: "100%", backgroundColor: colors.surface },
+   placeholder: { backgroundColor: colors.greenSoft },
++  discountBadge: {
++    position: "absolute",
++    top: spacing.sm,
++    left: spacing.sm,
++    paddingHorizontal: spacing.sm,
++    paddingVertical: 4,
++    borderRadius: 999,
++    backgroundColor: colors.orange,
++  },
++  discountText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
++  wishButton: {
++    position: "absolute",
++    top: spacing.sm,
++    right: spacing.sm,
++    width: 32,
++    height: 32,
++    borderRadius: 16,
++    alignItems: "center",
++    justifyContent: "center",
++    backgroundColor: "rgba(255,255,255,0.94)",
++  },
++  wishIcon: { color: colors.ink, fontSize: 18, fontWeight: "700" },
++  wishIconActive: { color: colors.green },
+   body: { padding: spacing.sm, gap: spacing.xs },
+-  brand: { fontSize: fontSize.xs, color: colors.muted, textTransform: "uppercase" },
+-  name: { fontSize: fontSize.sm, fontWeight: "600", color: colors.ink },
++  brand: { fontSize: 10, color: colors.green, fontWeight: "800", letterSpacing: 0.7, textTransform: "uppercase" },
++  name: { fontSize: fontSize.sm, fontWeight: "700", color: colors.ink, lineHeight: 18 },
+   priceRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.xs },
+   price: { fontSize: fontSize.md, fontWeight: "800", color: colors.greenDark },
+   compare: { fontSize: fontSize.xs, color: colors.muted, textDecorationLine: "line-through" },
+   signIn: { fontSize: fontSize.sm, fontWeight: "700", color: colors.orange },
+   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+-  stock: { fontSize: fontSize.xs, color: colors.muted },
+-  heart: { fontSize: 20, color: colors.orange },
++  stockPill: { borderRadius: 999, backgroundColor: colors.greenSoft, paddingHorizontal: spacing.sm, paddingVertical: 3 },
++  stock: { fontSize: 10, color: colors.greenDark, fontWeight: "700" },
+   line: {
+     flexDirection: "row",
+     gap: spacing.md,

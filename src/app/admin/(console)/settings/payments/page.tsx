@@ -29,7 +29,7 @@ export default function Payments() {
       </p>
       {error && <p role="alert">{error}</p>}
       <button
-        className="admin-btn"
+        className="admin-btn primary"
         disabled={busy}
         onClick={async () => {
           setBusy(true);

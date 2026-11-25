@@ -69,10 +69,18 @@ import {
   isPurchasableVariant,
 } from "../src/lib/catalog-visibility";
 import { hasCapability } from "../src/lib/capabilities";
-import type { Order, Product } from "../src/lib/types";
+import { canAccessAdmin } from "../src/lib/admin-access";
+import { getVendorSnapshot } from "../src/server/vendor";
+import {
+  claimVendorInvite,
+  readVendorInvite,
+} from "../src/server/vendor-invites";
+import type { Order, PaymentStatus, Product } from "../src/lib/types";
 import { getMigrations } from "better-auth/db/migration";
 import { GET as listProducts } from "../src/app/api/products/route";
 import { GET as productDetail } from "../src/app/api/products/[slug]/route";
+import { publishScheduledProducts } from "../src/server/product-scheduling";
+import { expireSourcingQuotes } from "../src/server/sourcing-expiry";
 
 const alice = { id: "alice", email: "alice@example.com", name: "Alice" };
 const bob = { id: "bob", email: "bob@example.com", name: "Bob" };
@@ -152,8 +160,8 @@ beforeAll(async () => {
     "004_assistant_proposals.sql",
     "005_mail_outbox_upgrade.sql",
     "006_operational_completion.sql",
-"007_push_tokens.sql",
-"008_push_outbox.sql",
+    "007_push_tokens.sql",
+    "008_push_outbox.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
@@ -174,6 +182,11 @@ beforeEach(async () => {
     restricted: false,
     subcategories: [],
     facets: [],
+  });
+  await put(database(), "vendors", "supplier-secret", {
+    id: "supplier-secret",
+    name: "Verified Tech Vendor",
+    status: "active",
   });
   await put(database(), "shippingZones", "lagos", {
     id: "lagos",
@@ -237,7 +250,7 @@ describe("price privacy and authorization", () => {
       }),
     ).rejects.toBeTruthy();
   });
-  it("excludes all prices and internal supplier data from public snapshots", async () => {
+  it("exposes the vendor label while excluding internal supplier data", async () => {
     await put(database(), "settings", "store", {
       storeName: "Paydan",
       supportEmail: "support@example.com",
@@ -271,6 +284,9 @@ describe("price privacy and authorization", () => {
       expect(wire).not.toContain(field);
     expect(result.orders).toEqual([]);
     expect(result.customers).toEqual([]);
+    expect(result.products[0]).toMatchObject({
+      vendorName: "Verified Tech Vendor",
+    });
   });
   it("paginates the public catalogue without exposing prices", async () => {
     const response = await listProducts(
@@ -286,6 +302,9 @@ describe("price privacy and authorization", () => {
     expect(body.products).toHaveLength(1);
     expect(body.products[0]).not.toHaveProperty("price");
     expect(body.products[0]).not.toHaveProperty("costPrice");
+    expect(body.products[0]).toMatchObject({
+      vendorName: "Verified Tech Vendor",
+    });
     expect(body.nextCursor).toBeNull();
   });
   it("loads a public product detail independently without leaking price", async () => {
@@ -297,7 +316,11 @@ describe("price privacy and authorization", () => {
     const body = (await response.json()) as {
       product: Record<string, unknown>;
     };
-    expect(body.product).toMatchObject({ id: "p1", slug: "phone" });
+    expect(body.product).toMatchObject({
+      id: "p1",
+      slug: "phone",
+      vendorName: "Verified Tech Vendor",
+    });
     expect(body.product).not.toHaveProperty("price");
     expect(body.product).not.toHaveProperty("vendorId");
   });
@@ -483,6 +506,58 @@ describe("money, stock and Paystack", () => {
     expect(result.amountKobo).toBe(235050);
     expect(kobo(0.29)).toBe(29);
     expect(() => kobo(1.001)).toThrow();
+  });
+  it("enforces promotion product, budget and per-customer limits", async () => {
+    await command(alice, "addToCart", ["p1", "v1", 1], "cart-limited-voucher");
+    await put(database(), "vouchers", "LIMITED", {
+      code: "LIMITED",
+      type: "fixed",
+      value: 100,
+      minimum: 0,
+      active: true,
+      categorySlugs: ["other"],
+    });
+    await expect(
+      quoteCart(database(), alice, { ...input, voucherCode: "LIMITED" }),
+    ).rejects.toMatchObject({ status: 400 });
+    await put(database(), "vouchers", "LIMITED", {
+      code: "LIMITED",
+      type: "fixed",
+      value: 100,
+      minimum: 0,
+      active: true,
+      categorySlugs: ["phones"],
+      budgetCap: 50,
+      discountUsed: 0,
+    });
+    await expect(
+      quoteCart(database(), alice, { ...input, voucherCode: "LIMITED" }),
+    ).rejects.toMatchObject({ status: 400 });
+    await put(database(), "vouchers", "LIMITED", {
+      code: "LIMITED",
+      type: "fixed",
+      value: 100,
+      minimum: 0,
+      active: true,
+      categorySlugs: ["phones"],
+      budgetCap: 500,
+      discountUsed: 0,
+      perCustomerLimit: 1,
+    });
+    await put(
+      database(),
+      "orders",
+      "prior-voucher-order",
+      {
+        id: "prior-voucher-order",
+        voucherCode: "LIMITED",
+        paymentStatus: "paid",
+      },
+      alice.id,
+    );
+    await expect(
+      quoteCart(database(), alice, { ...input, voucherCode: "LIMITED" }),
+    ).rejects.toMatchObject({ status: 400 });
   });
   it("blocks unconfirmed supply and unknown delivery zones before any charge", async () => {
     await command(alice, "addToCart", ["p1", "v1", 1], "cart-supplier");
@@ -727,6 +802,63 @@ describe("delivery infrastructure", () => {
 });
 
 describe("sourcing, returns, media and stock recovery", () => {
+  it("blocks duplicate sourcing requests and expires stale sent quotes", async () => {
+    const requestInput = {
+      customerName: "Alice",
+      email: alice.email,
+      phone: "08012345678",
+      productName: "Rare monitor",
+      categorySlug: "phones",
+      description: "A particular monitor",
+      quantity: 1,
+      city: "Ikeja",
+      state: "Lagos",
+    };
+    await command(alice, "submitSourcing", [requestInput], "source-unique");
+    await expect(
+      command(alice, "submitSourcing", [requestInput], "source-duplicate"),
+    ).rejects.toMatchObject({ status: 409 });
+    const request = (
+      await records<Record<string, unknown>>(database(), "sourcing")
+    )[0];
+    await put(
+      database(),
+      "sourcing",
+      String(request.id),
+      {
+        ...request,
+        status: "awaiting_customer",
+        quote: {
+          id: "expired-quote",
+          lines: [
+            {
+              id: "line",
+              description: "Rare monitor",
+              quantity: 1,
+              unitPrice: 200,
+            },
+          ],
+          total: 200,
+          validUntil: new Date(Date.now() - 60_000).toISOString(),
+          deliveryEstimate: "5 days",
+          status: "sent",
+          note: "",
+        },
+      },
+      alice.id,
+    );
+    const result = await expireSourcingQuotes();
+    expect(result.expired).toBe(1);
+    const expired = await record<{
+      status: string;
+      quote: { status: string };
+    }>(database(), "sourcing", String(request.id));
+    expect(expired).toMatchObject({
+      status: "quote_ready",
+      quote: { status: "expired" },
+    });
+  });
+
   it("requires supplier confirmation for an accepted quote and converts only once", async () => {
     const reference = await command(
       alice,
@@ -839,6 +971,7 @@ describe("sourcing, returns, media and stock recovery", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
   it("delivers public catalog media through the configured CDN only", async () => {
+    vi.stubEnv("MEDIA_CDN_URL", "media.paydan.test/assets");
     const url = catalogCdnUrl("catalog/image one.webp");
     expect(url).toBe(
       "https://media.paydan.test/assets/catalog/image%20one.webp",
@@ -1070,5 +1203,540 @@ describe("sourcing, returns, media and stock recovery", () => {
     expect(
       (await record<Order>(database(), "orders", order.id))!.paymentStatus,
     ).toBe("refunded");
+  });
+});
+
+describe("vendor portal isolation", () => {
+  const vendorA = {
+    id: "vendor-a-auth-user",
+    teamMemberId: "vendor-a-member",
+    email: "a@vendor.test",
+    name: "Vendor A",
+    role: "Vendor" as const,
+    vendorId: "supplier-secret",
+  };
+  const vendorB = {
+    id: "vendor-b-auth-user",
+    teamMemberId: "vendor-b-member",
+    email: "b@vendor.test",
+    name: "Vendor B",
+    role: "Vendor" as const,
+    vendorId: "supplier-b",
+  };
+
+  beforeEach(async () => {
+    await put(database(), "vendors", "supplier-secret", {
+      id: "supplier-secret",
+      name: "Supplier Secret",
+      status: "active",
+    });
+    await put(database(), "vendors", "supplier-b", {
+      id: "supplier-b",
+      name: "Supplier B",
+      status: "active",
+    });
+    await put(database(), "vendors", "supplier-c", {
+      id: "supplier-c",
+      name: "Supplier C",
+      status: "active",
+    });
+    for (const member of [
+      {
+        ...vendorA,
+        id: vendorA.teamMemberId,
+        role: "Vendor",
+        status: "active",
+        lastActive: "",
+      },
+      {
+        ...vendorB,
+        id: vendorB.teamMemberId,
+        role: "Vendor",
+        status: "active",
+        lastActive: "",
+      },
+    ])
+      await put(database(), "team", member.id, member);
+    await put(database(), "products", "p2", {
+      ...product,
+      id: "p2",
+      slug: "phone-b",
+      sku: "PHONE-B",
+      name: "A second phone",
+      vendorId: "supplier-b",
+      variants: [
+        {
+          ...product.variants[0],
+          id: "v2",
+          sku: "PHONE-B-1",
+        },
+      ],
+    });
+    await put(
+      database(),
+      "orders",
+      "vendor-order",
+      {
+        id: "vendor-order",
+        reference: "PAYDAN-VENDOR-1",
+        customerId: alice.id,
+        customerName: alice.name,
+        placedAt: new Date().toISOString(),
+        paymentStatus: "paid",
+        fulfillmentStatus: "processing",
+        items: [],
+        total: 1000,
+        vendorGroups: [
+          {
+            id: "group-a",
+            vendorId: "supplier-secret",
+            items: [],
+            stage: "awaiting_assignment",
+            eta: "3 days",
+            urgent: false,
+            notes: "",
+            updatedAt: new Date().toISOString(),
+          },
+          {
+            id: "group-b",
+            vendorId: "supplier-b",
+            items: [],
+            stage: "awaiting_assignment",
+            eta: "3 days",
+            urgent: false,
+            notes: "",
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      },
+      alice.id,
+    );
+  });
+
+  it("scopes snapshots to the assigned supplier and strips internal pricing", async () => {
+    const snapshotA = await getVendorSnapshot(vendorA);
+    expect(snapshotA.products.map((item) => item.id)).toEqual(["p1"]);
+    expect(snapshotA.orders).toHaveLength(1);
+    const wire = JSON.stringify(snapshotA);
+    expect(wire).not.toContain("costPrice");
+    expect(wire).not.toContain("group-b");
+    expect(wire).not.toContain("supplier-b");
+  });
+
+  it("blocks vendor roles from every admin route", () => {
+    expect(canAccessAdmin("Vendor", "/admin")).toBe(false);
+    expect(canAccessAdmin("Vendor", "/admin/products")).toBe(false);
+    expect(canAccessAdmin("Vendor", "/admin/settings/team")).toBe(false);
+    expect(hasCapability("Vendor", "catalog.read")).toBe(false);
+  });
+
+  it("rejects cross-vendor product and stock writes", async () => {
+    await expect(
+      command(
+        vendorA,
+        "saveVendorProduct",
+        [{ id: "p2" }, { name: "stolen" }],
+        "vendor-cross-product",
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      command(
+        vendorA,
+        "saveVendorStock",
+        [{ productId: "p2", variantId: "v1", available: 99 }],
+        "vendor-cross-stock",
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    await command(
+      vendorA,
+      "saveVendorProduct",
+      [{ id: "p1" }, { name: "Vendor A phone" }],
+      "vendor-own-product",
+    );
+    expect(
+      (await record<{ name: string }>(database(), "products", "p1"))!.name,
+    ).toBe("Vendor A phone");
+  });
+
+  it("blocks the next command immediately after suspension", async () => {
+    await put(database(), "team", vendorA.teamMemberId, {
+      ...vendorA,
+      id: vendorA.teamMemberId,
+      status: "suspended",
+      lastActive: "",
+    });
+    await expect(
+      command(
+        vendorA,
+        "saveVendorStock",
+        [{ productId: "p1", variantId: "v1", available: 1 }],
+        "suspended-vendor-stock",
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("issues a single usable invite and marks it accepted after setup", async () => {
+    const result = await command(
+      admin,
+      "createVendorAccount",
+      [
+        {
+          vendorId: "supplier-c",
+          name: "New Vendor",
+          email: "new@vendor.test",
+        },
+      ],
+      "vendor-invite-create",
+    );
+    expect(result).toMatchObject({ email: "new@vendor.test" });
+    const invites = await records<{ token: string; email: string }>(
+      database(),
+      "vendorInvites",
+    );
+    expect(invites).toHaveLength(1);
+    const details = await readVendorInvite(invites[0].token);
+    expect(details).toMatchObject({
+      email: "new@vendor.test",
+      vendorName: "Supplier C",
+    });
+    await claimVendorInvite(invites[0].token);
+    await expect(readVendorInvite(invites[0].token)).rejects.toMatchObject({
+      status: 410,
+    });
+  });
+
+  it("changes linked email through vendor controls and prevents unscoped vendor roles", async () => {
+    const created = await command(
+      admin,
+      "createVendorAccount",
+      [
+        {
+          vendorId: "supplier-c",
+          name: "Vendor C",
+          email: "old@vendor.test",
+        },
+      ],
+      "vendor-email-create",
+    );
+    await command(
+      admin,
+      "updateVendorAccount",
+      [{ id: created.id, email: "new@vendor.test" }],
+      "vendor-email-change",
+    );
+    expect(
+      await record<{ email: string; status: string }>(
+        database(),
+        "team",
+        created.id,
+      ),
+    ).toMatchObject({ email: "new@vendor.test", status: "invited" });
+    await expect(
+      command(
+        admin,
+        "addTeamMember",
+        [
+          {
+            name: "Unscoped vendor",
+            email: "unsafe@vendor.test",
+            role: "Vendor",
+            status: "invited",
+            lastActive: "",
+          },
+        ],
+        "vendor-unscoped-role",
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("catalogue operations and order dispatch", () => {
+  beforeEach(async () => {
+    await put(database(), "vendors", "supplier-secret", {
+      id: "supplier-secret",
+      name: "Supplier Secret",
+      status: "active",
+    });
+  });
+
+  function readyProduct(id: string, sku: string, slug: string) {
+    return put(database(), "products", id, {
+      ...product,
+      id,
+      sku,
+      slug,
+      status: "draft",
+      variants: [{ ...product.variants[0], id: "v-" + id, sku: sku + "-1" }],
+    });
+  }
+
+  function paidOrder(
+    id: string,
+    reference: string,
+    paymentStatus: PaymentStatus = "paid",
+  ) {
+    return put(
+      database(),
+      "orders",
+      id,
+      {
+        id,
+        reference,
+        customerId: alice.id,
+        customerName: alice.name,
+        customerEmail: alice.email,
+        customerPhone: "08012345678",
+        placedAt: new Date().toISOString(),
+        paymentStatus,
+        fulfillmentStatus: "processing",
+        paymentMethod: "paystack",
+        items: [],
+        subtotal: 1000,
+        deliveryFee: 0,
+        discount: 0,
+        total: 1000,
+        address: {
+          id: "address-1",
+          label: "Home",
+          recipient: "Alice",
+          phone: "08012345678",
+          street: "1 Test Road",
+          city: "Ikeja",
+          state: "Lagos",
+          isDefault: true,
+        },
+        vendorGroups: [],
+        timeline: [],
+        notes: "",
+        trackingCode: "",
+      } satisfies Order,
+      alice.id,
+    );
+  }
+
+  it("blocks publishing until readiness checks pass", async () => {
+    await put(database(), "products", "p1", { ...product, status: "draft" });
+    await database().query("DELETE FROM inventory WHERE product_id=$1", [
+      product.id,
+    ]);
+    await expect(
+      command(
+        admin,
+        "setProductStatus",
+        ["p1", "published"],
+        "readiness-block",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await record<Product>(database(), "products", "p1"))!.status).toBe(
+      "draft",
+    );
+  });
+
+  it("stops a bulk publish at the first product with missing stock", async () => {
+    await readyProduct("p2", "P2-SKU", "p2");
+    await database().query("DELETE FROM inventory WHERE product_id=$1", ["p2"]);
+    await expect(
+      command(
+        admin,
+        "bulkProductStatus",
+        [{ ids: ["p1", "p2"], status: "published" }],
+        "bulk-block",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await record<Product>(database(), "products", "p1"))!.status).toBe(
+      "published",
+    );
+    expect((await record<Product>(database(), "products", "p2"))!.status).toBe(
+      "draft",
+    );
+  });
+
+  it("duplicates products with fresh identifiers and drafts reassignments", async () => {
+    const result = await command(
+      admin,
+      "duplicateProduct",
+      ["p1"],
+      "duplicate-one",
+    );
+    const copy = (await record<Product>(database(), "products", result.id))!;
+    expect(copy.status).toBe("draft");
+    expect(copy.sku).not.toBe(product.sku);
+    await put(database(), "vendors", "supplier-two", {
+      id: "supplier-two",
+      name: "Supplier Two",
+      status: "active",
+    });
+    await command(
+      admin,
+      "bulkReassignProducts",
+      [{ ids: ["p1"], vendorId: "supplier-two" }],
+      "reassign-one",
+    );
+    const moved = (await record<Product>(database(), "products", "p1"))!;
+    expect(moved).toMatchObject({ vendorId: "supplier-two", status: "draft" });
+  });
+
+  it("imports draft products and rejects unknown departments or suppliers", async () => {
+    const result = await command(
+      admin,
+      "importProducts",
+      [
+        [
+          {
+            name: "Imported phone",
+            sku: "IMPORT-1",
+            price: 500,
+            costPrice: 300,
+            categorySlug: "phones",
+            vendorId: "supplier-secret",
+          },
+        ],
+      ],
+      "import-one",
+    );
+    expect(result).toMatchObject({ imported: 1 });
+    expect(
+      (await record<Product>(database(), "products", result.ids[0]))!.status,
+    ).toBe("draft");
+    await expect(
+      command(
+        admin,
+        "importProducts",
+        [
+          [
+            {
+              name: "Bad phone",
+              sku: "BAD-1",
+              price: 500,
+              costPrice: 300,
+              categorySlug: "phones",
+              vendorId: "missing-supplier",
+            },
+          ],
+        ],
+        "import-invalid",
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("publishes due schedules and records blocked schedules with reasons", async () => {
+    await command(
+      admin,
+      "scheduleProductPublish",
+      [["p1", new Date(Date.now() + 3_600_000).toISOString()]],
+      "schedule-one",
+    );
+    await put(database(), "productMeta", "schedule:p1", {
+      id: "schedule:p1",
+      productId: "p1",
+      publishAt: new Date(Date.now() - 1000).toISOString(),
+      status: "scheduled",
+    });
+    const published = await publishScheduledProducts(database());
+    expect(published).toMatchObject({ processed: 1, published: 1 });
+    expect((await record<Product>(database(), "products", "p1"))!.status).toBe(
+      "published",
+    );
+
+    await put(database(), "products", "p2", {
+      ...product,
+      id: "p2",
+      sku: "P2-SCHEDULE",
+      slug: "p2-schedule",
+      status: "draft",
+      variants: [{ ...product.variants[0], id: "v2", sku: "P2-SCHEDULE-1" }],
+    });
+    await database().query("DELETE FROM inventory WHERE product_id=$1", ["p2"]);
+    await put(database(), "productMeta", "schedule:p2", {
+      id: "schedule:p2",
+      productId: "p2",
+      publishAt: new Date(Date.now() - 1000).toISOString(),
+      status: "scheduled",
+    });
+    const blocked = await publishScheduledProducts(database());
+    expect(blocked).toMatchObject({ processed: 1, blocked: 1 });
+    const meta = await record<{ status: string; issues: string[] }>(
+      database(),
+      "productMeta",
+      "schedule:p2",
+    );
+    expect(meta!.status).toBe("blocked");
+    expect(meta!.issues.join(" ")).toContain("stock");
+  });
+
+  it("records stock movements with a reason and before/after values", async () => {
+    const movement = await command(
+      admin,
+      "adjustStock",
+      [
+        {
+          productId: "p1",
+          variantId: "v1",
+          available: 8,
+          reason: "Delivery received",
+        },
+      ],
+      "stock-movement",
+    );
+    expect(movement).toMatchObject({
+      before: 5,
+      after: 8,
+      delta: 3,
+      reason: "Delivery received",
+    });
+    await expect(
+      command(
+        admin,
+        "adjustStock",
+        [{ productId: "p1", variantId: "v1", available: 9 }],
+        "stock-without-reason",
+      ),
+    ).rejects.toBeTruthy();
+  });
+
+  it("bulk dispatches paid orders with validated tracking and keeps authorization", async () => {
+    await paidOrder("ship-1", "PAYDAN-SHIP-1");
+    await paidOrder("ship-2", "PAYDAN-SHIP-2");
+    await paidOrder("ship-3", "PAYDAN-SHIP-3", "pending");
+    await expect(
+      command(
+        alice,
+        "bulkShipOrders",
+        [{ ids: ["ship-1"], trackingCode: "ABC123" }],
+        "ship-unauthorized",
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      command(
+        admin,
+        "bulkShipOrders",
+        [{ ids: ["ship-1", "ship-2", "ship-3"], trackingCode: "A" }],
+        "ship-bad-tracking",
+      ),
+    ).rejects.toBeTruthy();
+    await expect(
+      command(
+        admin,
+        "bulkShipOrders",
+        [{ ids: ["ship-1", "ship-2", "ship-3"], trackingCode: "ABC123" }],
+        "ship-unpaid",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    const result = await command(
+      admin,
+      "bulkShipOrders",
+      [{ ids: ["ship-1", "ship-2"], trackingCode: "ABC123" }],
+      "ship-valid",
+    );
+    expect(result).toMatchObject({ shipped: 2 });
+    for (const id of ["ship-1", "ship-2"]) {
+      const order = (await record<Order>(database(), "orders", id))!;
+      expect(order.fulfillmentStatus).toBe("dispatched");
+      expect(order.trackingCode).toBe("ABC123");
+      expect(order.timeline.at(-1)).toMatchObject({
+        label: "dispatched",
+        note: "Tracking ABC123",
+      });
+    }
   });
 });

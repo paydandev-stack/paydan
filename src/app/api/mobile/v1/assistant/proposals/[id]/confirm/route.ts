@@ -24,9 +24,7 @@ export async function POST(
     requireMobileUser(user);
     await mobileLimit(`mobile-proposal:${user.id}`, 30);
     const { id } = await context.params;
-    return mobileJson(
-      await confirmAssistantProposal(user, { proposalId: id }),
-    );
+    return mobileJson(await confirmAssistantProposal(user, { proposalId: id }));
   } catch (error) {
     return mobileFailure(error);
   }

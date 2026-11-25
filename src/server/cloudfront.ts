@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
 import { HttpError } from "./http";
+import { mediaCdnBase } from "@/lib/media-origin";
 
 function privateKey(): string {
   const encoded = process.env.CLOUDFRONT_PRIVATE_KEY_BASE64?.trim();
@@ -30,19 +31,14 @@ function ttlSeconds(): number {
 }
 
 export function cloudFrontObjectUrl(objectKey: string): string {
-  const base = process.env.MEDIA_CDN_URL?.trim();
-  if (!base)
-    throw new HttpError(503, "Private media delivery is not configured yet.");
-  const root = new URL(base);
-  if (
-    root.protocol !== "https:" ||
-    root.username ||
-    root.password ||
-    root.search ||
-    root.hash
-  )
+  let root: URL | null;
+  try {
+    root = mediaCdnBase(process.env.MEDIA_CDN_URL);
+  } catch {
     throw new HttpError(503, "Private media delivery is misconfigured.");
-  root.pathname = `${root.pathname.replace(/\/+$/, "")}/`;
+  }
+  if (!root)
+    throw new HttpError(503, "Private media delivery is not configured yet.");
   const encodedKey = objectKey
     .split("/")
     .map((part) => encodeURIComponent(part))

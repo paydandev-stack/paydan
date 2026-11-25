@@ -1,6 +1,6 @@
 import { Webhook } from "svix";
 import { z } from "zod";
-import { database, transaction } from "@/server/db";
+import { put, transaction } from "@/server/db";
 
 export const runtime = "nodejs";
 
@@ -49,6 +49,12 @@ export async function POST(request: Request) {
       [id, event.type],
     );
     if (!inserted.rows.length) return;
+    await put(db, "webhookStatus", "resend", {
+      id: "resend",
+      status: "verified",
+      lastEventType: event.type,
+      lastEventAt: new Date().toISOString(),
+    });
     const providerId = event.data.email_id;
     if (providerId) {
       if (event.type === "email.delivered")

@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { api } from "@/lib/api-client";
 import { useDemo } from "@/lib/store";
 import { nigerianStates } from "@/lib/catalog";
 import { AdminPageHeader } from "@/components/admin/page-header";
@@ -9,8 +10,9 @@ import { AdminTextArea, AdminTextField } from "@/components/admin/data-table";
 import { StatusPill } from "@/components/status-pill";
 import { formatDate, money, plural } from "@/lib/format";
 import { productStatusMeta, vendorStatusMeta } from "@/lib/status";
-import type { Vendor, VendorStatus } from "@/lib/types";
+import type { DemoState, Vendor, VendorStatus } from "@/lib/types";
 import { hasCapability } from "@/lib/capabilities";
+import { getAdminRecords, putAdminRecord } from "@/lib/admin-records";
 type VendorForm = {
   name: string;
   contactName: string;
@@ -130,12 +132,243 @@ function MultiSelectField({
     </div>
   );
 }
+
+type VendorRecord = Record<string, unknown> & {
+  id: string;
+  vendorId?: string;
+  updatedAt?: string;
+};
+
+function VendorOperations({
+  vendor,
+  state,
+  canWrite,
+}: {
+  vendor: Vendor;
+  state: DemoState;
+  canWrite: boolean;
+}) {
+  const [documents, setDocuments] = useState<VendorRecord[]>([]);
+  const [payout, setPayout] = useState<VendorRecord | null>(null);
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [documentUrl, setDocumentUrl] = useState("");
+  const [documentExpiry, setDocumentExpiry] = useState("");
+  const [payoutReference, setPayoutReference] = useState("");
+  const [payoutLastFour, setPayoutLastFour] = useState("");
+  const [payoutBank, setPayoutBank] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!canWrite) return;
+    void Promise.all([
+      getAdminRecords<VendorRecord>("vendorDocuments"),
+      getAdminRecords<VendorRecord>("vendorPayouts"),
+    ])
+      .then(([savedDocuments, savedPayouts]) => {
+        setDocuments(
+          savedDocuments.filter((item) => item.vendorId === vendor.id),
+        );
+        const saved = savedPayouts.find(
+          (item) => item.id === `payout:${vendor.id}`,
+        );
+        setPayout(saved ?? null);
+        setPayoutReference(String(saved?.providerReference ?? ""));
+        setPayoutLastFour(String(saved?.accountLastFour ?? ""));
+        setPayoutBank(String(saved?.bankName ?? ""));
+      })
+      .catch((reason) => setError((reason as Error).message));
+  }, [canWrite, vendor.id]);
+
+  const groups = state.orders.flatMap((order) =>
+    order.vendorGroups
+      .filter((group) => group.vendorId === vendor.id)
+      .map((group) => ({ order, group })),
+  );
+  const closed = groups.filter(({ group }) => group.stage === "closed");
+  const onTime = closed.filter(({ group }) => {
+    const eta = Date.parse(group.eta);
+    return Number.isFinite(eta) && Date.parse(group.updatedAt) <= eta;
+  }).length;
+  const onTimeRate = closed.length
+    ? Math.round((onTime / closed.length) * 100)
+    : 0;
+
+  if (!canWrite) return null;
+  return (
+    <section className="admin-panels" style={{ marginTop: "1rem" }}>
+      <article className="admin-card">
+        <h3>Performance scorecard</h3>
+        <div className="admin-meta">
+          <div>
+            <span>Supplier groups</span>
+            <strong>{groups.length}</strong>
+          </div>
+          <div>
+            <span>Closed groups</span>
+            <strong>{closed.length}</strong>
+          </div>
+          <div>
+            <span>On-time delivery</span>
+            <strong>{onTimeRate}%</strong>
+          </div>
+          <div>
+            <span>Reliability</span>
+            <strong>{vendor.reliability} / 100</strong>
+          </div>
+        </div>
+        <button
+          className="admin-btn secondary"
+          type="button"
+          onClick={() =>
+            void putAdminRecord("vendorScorecards", `scorecard:${vendor.id}`, {
+              vendorId: vendor.id,
+              supplierGroups: groups.length,
+              closedGroups: closed.length,
+              onTimeDeliveries: onTime,
+              onTimeRate,
+              reliability: vendor.reliability,
+              measuredAt: new Date().toISOString(),
+            })
+          }
+        >
+          Snapshot scorecard
+        </button>
+      </article>
+
+      <form
+        className="admin-card form-grid"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          try {
+            const saved = await putAdminRecord<VendorRecord>(
+              "vendorDocuments",
+              `document:${vendor.id}:${crypto.randomUUID()}`,
+              {
+                vendorId: vendor.id,
+                title: documentTitle.trim(),
+                url: documentUrl.trim(),
+                expiresAt: documentExpiry
+                  ? `${documentExpiry}T23:59:59.999Z`
+                  : "",
+                status: "active",
+              },
+            );
+            setDocuments((current) => [saved, ...current]);
+            setDocumentTitle("");
+            setDocumentUrl("");
+            setDocumentExpiry("");
+          } catch (reason) {
+            setError((reason as Error).message);
+          }
+        }}
+      >
+        <h3 className="wide">Supplier documents</h3>
+        {documents.map((document) => (
+          <a
+            className="queue-item wide"
+            key={document.id}
+            href={String(document.url)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span>
+              <strong>{String(document.title)}</strong>
+              <br />
+              <small>{String(document.status ?? "active")}</small>
+            </span>
+            <span>
+              {document.expiresAt
+                ? `Expires ${formatDate(String(document.expiresAt))}`
+                : "No expiry"}
+            </span>
+          </a>
+        ))}
+        <AdminTextField
+          label="Document title"
+          required
+          value={documentTitle}
+          onChange={(event) => setDocumentTitle(event.target.value)}
+        />
+        <AdminTextField
+          label="Secure document URL"
+          type="url"
+          required
+          value={documentUrl}
+          onChange={(event) => setDocumentUrl(event.target.value)}
+        />
+        <AdminTextField
+          label="Expiry date"
+          type="date"
+          value={documentExpiry}
+          onChange={(event) => setDocumentExpiry(event.target.value)}
+        />
+        <button className="admin-btn primary">Add document</button>
+      </form>
+
+      <form
+        className="admin-card form-grid"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          try {
+            const saved = await putAdminRecord<VendorRecord>(
+              "vendorPayouts",
+              `payout:${vendor.id}`,
+              {
+                vendorId: vendor.id,
+                bankName: payoutBank.trim(),
+                accountLastFour: payoutLastFour.trim(),
+                providerReference: payoutReference.trim(),
+                status: payoutReference.trim() ? "configured" : "pending",
+              },
+            );
+            setPayout(saved);
+          } catch (reason) {
+            setError((reason as Error).message);
+          }
+        }}
+      >
+        <h3 className="wide">Payout setup</h3>
+        <p className="wide">
+          Store the provider recipient reference and masked account details;
+          full bank account numbers stay with the payment provider.
+        </p>
+        <AdminTextField
+          label="Bank"
+          required
+          value={payoutBank}
+          onChange={(event) => setPayoutBank(event.target.value)}
+        />
+        <AdminTextField
+          label="Account last four"
+          required
+          pattern="[0-9]{4}"
+          value={payoutLastFour}
+          onChange={(event) => setPayoutLastFour(event.target.value)}
+        />
+        <AdminTextField
+          label="Provider recipient reference"
+          value={payoutReference}
+          onChange={(event) => setPayoutReference(event.target.value)}
+        />
+        <button className="admin-btn primary">Save payout setup</button>
+        {payout ? (
+          <StatusPill
+            tone={payout.status === "configured" ? "green" : "orange"}
+          >
+            {String(payout.status)}
+          </StatusPill>
+        ) : null}
+        {error ? <p className="form-error wide">{error}</p> : null}
+      </form>
+    </section>
+  );
+}
 /** Supplier record: editable profile alongside network stats and supply links. */
 export default function AdminVendorDetailPage() {
   const params = useParams<{
     id: string;
   }>();
-  const { state, actions } = useDemo();
+  const { state, actions, refresh } = useDemo();
   const canWrite = hasCapability(state.adminSession?.role, "vendors.write");
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const vendor = state.vendors.find((item) => item.id === idParam);
@@ -156,6 +389,10 @@ export default function AdminVendorDetailPage() {
           notes: "",
         },
   );
+  const [portalEmail, setPortalEmail] = useState("");
+  const [linkedEmails, setLinkedEmails] = useState<Record<string, string>>({});
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   if (!vendor) notFound();
   function set<K extends keyof VendorForm>(key: K, value: VendorForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -163,9 +400,34 @@ export default function AdminVendorDetailPage() {
   const resetForm = () => {
     setForm(toForm(vendor));
   };
+
+  async function portalCommand(name: string, args: unknown[], success: string) {
+    setPortalBusy(true);
+    try {
+      await api("/api/commands", {
+        name,
+        args,
+        key: name + ":" + Date.now() + ":" + Math.random(),
+      });
+      await refresh();
+      actions.notify(success, "success");
+      return true;
+    } catch (error) {
+      actions.notify(
+        error instanceof Error
+          ? error.message
+          : "Could not update portal access.",
+        "error",
+      );
+      return false;
+    } finally {
+      setPortalBusy(false);
+    }
+  }
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     try {
       event.preventDefault();
+      if (saving) return;
       const name = form.name.trim();
       const contactName = form.contactName.trim();
       const email = form.email.trim();
@@ -209,10 +471,18 @@ export default function AdminVendorDetailPage() {
         paymentTerms: form.paymentTerms.trim(),
         notes: form.notes.trim(),
       };
+      setSaving(true);
       await actions.saveVendor(updated);
       actions.notify(`${updated.name} profile updated`);
       setForm(toForm(updated));
-    } catch (error) {}
+    } catch (cause) {
+      actions.notify(
+        cause instanceof Error ? cause.message : "Could not save this profile.",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const supplied = state.products.filter(
     (product) => product.vendorId === vendor.id,
@@ -317,12 +587,21 @@ export default function AdminVendorDetailPage() {
             />
           </div>
           <div className="form-actions">
-            <button type="button" onClick={resetForm}>
+            <button
+              type="button"
+              className="admin-btn quiet"
+              disabled={saving}
+              onClick={resetForm}
+            >
               Discard changes
             </button>
             {canWrite ? (
-              <button type="submit" className="primary">
-                Save profile
+              <button
+                type="submit"
+                className="admin-btn primary"
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Save profile"}
               </button>
             ) : null}
           </div>
@@ -368,7 +647,9 @@ export default function AdminVendorDetailPage() {
             {canWrite ? (
               <button
                 type="button"
-                className="admin-btn ghost"
+                className={`admin-btn ${
+                  vendor.status === "active" ? "danger" : "secondary"
+                }`}
                 style={{ width: "100%" }}
                 onClick={async () => {
                   try {
@@ -417,8 +698,212 @@ export default function AdminVendorDetailPage() {
               supplying vendor on a product to link one.
             </p>
           )}
+
+          <h3 style={{ marginTop: "1.5rem" }}>Portal access</h3>
+          {canWrite &&
+          vendor.status === "active" &&
+          !state.team.some(
+            (member) =>
+              member.role === "Vendor" && member.vendorId === vendor.id,
+          ) ? (
+            <>
+              <p
+                style={{
+                  color: "var(--muted)",
+                  fontSize: ".68rem",
+                  lineHeight: 1.7,
+                }}
+              >
+                Create a vendor login so this supplier can edit assigned
+                catalogue details and view their order queue.
+              </p>
+              <form
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (!portalEmail.trim()) return;
+                  const saved = await portalCommand(
+                    "createVendorAccount",
+                    [
+                      {
+                        vendorId: vendor.id,
+                        name: vendor.contactName || vendor.name,
+                        email: portalEmail.trim(),
+                      },
+                    ],
+                    "Vendor access created and invitation queued.",
+                  );
+                  if (saved) setPortalEmail("");
+                }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: ".5rem",
+                  marginTop: ".6rem",
+                }}
+              >
+                <label className="admin-field wide">
+                  Vendor login email
+                  <input
+                    className="admin-input"
+                    type="email"
+                    required
+                    value={portalEmail}
+                    onChange={(event) => setPortalEmail(event.target.value)}
+                    placeholder="supplier@example.com"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="admin-btn primary"
+                  disabled={portalBusy}
+                  style={{ width: "100%" }}
+                >
+                  Create vendor access
+                </button>
+              </form>
+            </>
+          ) : null}
+
+          <div style={{ marginTop: ".9rem", display: "grid", gap: ".5rem" }}>
+            {state.team
+              .filter(
+                (member) =>
+                  member.role === "Vendor" && member.vendorId === vendor.id,
+              )
+              .map((member) => (
+                <div
+                  className="queue-item"
+                  key={member.id}
+                  style={{ width: "100%", alignItems: "flex-start" }}
+                >
+                  <span>
+                    <strong>{member.name}</strong>
+                    <br />
+                    <small style={{ color: "var(--muted)" }}>
+                      Linked login: {member.email} · {member.status}
+                    </small>
+                    {canWrite ? (
+                      <span
+                        style={{
+                          display: "flex",
+                          gap: ".35rem",
+                          marginTop: ".45rem",
+                        }}
+                      >
+                        <input
+                          className="admin-input"
+                          type="email"
+                          aria-label={`Linked email for ${member.name}`}
+                          value={linkedEmails[member.id] ?? member.email}
+                          onChange={(event) =>
+                            setLinkedEmails((current) => ({
+                              ...current,
+                              [member.id]: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="admin-btn secondary"
+                          disabled={
+                            portalBusy ||
+                            !(linkedEmails[member.id] ?? member.email).trim() ||
+                            (linkedEmails[member.id] ?? member.email)
+                              .trim()
+                              .toLowerCase() === member.email.toLowerCase()
+                          }
+                          onClick={async () => {
+                            const email = (
+                              linkedEmails[member.id] ?? member.email
+                            )
+                              .trim()
+                              .toLowerCase();
+                            const saved = await portalCommand(
+                              "updateVendorAccount",
+                              [{ id: member.id, email }],
+                              "Linked email changed and a new invitation queued.",
+                            );
+                            if (saved)
+                              setLinkedEmails((current) => ({
+                                ...current,
+                                [member.id]: email,
+                              }));
+                          }}
+                        >
+                          Change email
+                        </button>
+                      </span>
+                    ) : null}
+                  </span>
+                  {canWrite ? (
+                    <span
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: ".3rem",
+                        justifyContent: "flex-end",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="admin-btn secondary"
+                        disabled={portalBusy}
+                        onClick={() =>
+                          portalCommand(
+                            "updateVendorAccount",
+                            [{ id: member.id, resend: true }],
+                            "Invitation email queued.",
+                          )
+                        }
+                      >
+                        Resend
+                      </button>
+                      <button
+                        type="button"
+                        className={`admin-btn ${
+                          member.status === "suspended" ? "secondary" : "danger"
+                        }`}
+                        disabled={portalBusy}
+                        onClick={() =>
+                          portalCommand(
+                            "updateVendorAccount",
+                            [
+                              {
+                                id: member.id,
+                                status:
+                                  member.status === "suspended"
+                                    ? "active"
+                                    : "suspended",
+                              },
+                            ],
+                            "Vendor access status updated.",
+                          )
+                        }
+                      >
+                        {member.status === "suspended" ? "Enable" : "Suspend"}
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-btn danger"
+                        disabled={portalBusy}
+                        onClick={() =>
+                          portalCommand(
+                            "unlinkVendorAccount",
+                            [member.id],
+                            "Vendor access unlinked.",
+                          )
+                        }
+                      >
+                        Unlink
+                      </button>
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+          </div>
         </aside>
       </div>
+      <VendorOperations vendor={vendor} state={state} canWrite={canWrite} />
     </>
   );
 }

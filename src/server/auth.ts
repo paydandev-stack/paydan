@@ -37,10 +37,7 @@ export function auth() {
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: process.env.BETTER_AUTH_URL,
     trustedOrigins: trustedOrigins(),
-plugins: [
-bearer(),
-expo(),
-],
+    plugins: [bearer(), expo()],
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 12,

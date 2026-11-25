@@ -36,6 +36,7 @@ export const catalogProductSchema = z.object({
   name: z.string(),
   categorySlug: z.string(),
   brand: z.string(),
+  vendorName: z.string().optional(),
   images: z.array(z.string()),
   description: z.string(),
   highlights: z.array(z.string()),

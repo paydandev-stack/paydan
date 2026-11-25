@@ -27,6 +27,8 @@ export type Product = {
   brand: string;
   images: string[];
   imageAlts?: Record<string, string>;
+  seoTitle?: string;
+  seoDescription?: string;
   description: string;
   highlights: string[];
   specifications: Record<string, string>;
@@ -34,6 +36,8 @@ export type Product = {
   compareAt?: Money;
   availability: Availability;
   vendorId: string;
+  /** Customer-safe vendor display name, derived for storefront responses. */
+  vendorName?: string;
   /** Internal only — never rendered on customer pages. */
   costPrice: Money;
   variants: ProductVariant[];
@@ -87,6 +91,7 @@ export type Vendor = {
   paymentTerms: string;
   notes: string;
   reliability: number; // 0-100 internal scorecard
+  ownerTeamMemberId?: string;
   createdAt: string;
 };
 
@@ -111,6 +116,9 @@ export type Customer = {
   state: string;
   joinedAt: string;
   segments: string[];
+  tags: string[];
+  lifecycleStage?: "new" | "active" | "at_risk" | "inactive" | "vip";
+  marketingConsent: boolean;
   notes: string;
 };
 
@@ -165,6 +173,9 @@ export type VendorSubOrder = {
   eta: string;
   urgent: boolean;
   notes: string;
+  purchaseOrderRef?: string;
+  evidenceUrls?: string[];
+  stageReason?: string;
   updatedAt: string;
 };
 
@@ -199,6 +210,7 @@ export type Order = {
   subtotal: Money;
   deliveryFee: Money;
   discount: Money;
+  voucherCode?: string;
   total: Money;
   address: Address;
   vendorGroups: VendorSubOrder[];
@@ -257,6 +269,8 @@ export type SourcingRequest = {
   assignee: string;
   adminNotes: string;
   quote?: Quote;
+  /** Previous quote snapshots retained whenever an operator saves a revision. */
+  quoteHistory?: Quote[];
   convertedOrderId?: string;
 };
 
@@ -270,6 +284,8 @@ export type Banner = {
   image: string;
   altText?: string;
   placement: "hero" | "side";
+  priority?: number;
+  clickCount?: number;
   active: boolean;
   startAt: string;
   endAt: string;
@@ -283,6 +299,16 @@ export type Voucher = {
   minimum: number;
   description: string;
   active: boolean;
+  startAt?: string;
+  endAt?: string;
+  usageLimit?: number;
+  usageCount?: number;
+  perCustomerLimit?: number;
+  budgetCap?: Money;
+  discountUsed?: Money;
+  categorySlugs?: string[];
+  productIds?: string[];
+  stackingAllowed?: boolean;
 };
 
 export type ReturnStatus =
@@ -306,6 +332,11 @@ export type ReturnRequest = {
   status: ReturnStatus;
   createdAt: string;
   adminNote: string;
+  slaDueAt?: string;
+  partialRefundAmount?: number;
+  providerRef?: string;
+  failureReason?: string;
+  retryCount?: number;
 };
 
 export type AdminRole =
@@ -313,13 +344,15 @@ export type AdminRole =
   | "Catalog Manager"
   | "Order Manager"
   | "Procurement Manager"
-  | "Support";
+  | "Support"
+  | "Vendor";
 
 export type TeamMember = {
   id: string;
   name: string;
   email: string;
   role: AdminRole;
+  vendorId?: string;
   status: "active" | "invited" | "suspended";
   lastActive: string;
 };
@@ -331,7 +364,9 @@ export type AuditEntry = {
   record: string;
   at: string;
   capability?: string;
-  source?: "admin" | "customer" | "worker" | "webhook";
+  source?: "admin" | "customer" | "worker" | "webhook" | "vendor";
+  before?: unknown;
+  after?: unknown;
 };
 
 export type Notification = {

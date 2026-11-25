@@ -12,10 +12,12 @@ import {
 import { roleOptions } from "@/lib/roles";
 import { ageLabel, formatDate, plural } from "@/lib/format";
 import type { AdminRole } from "@/lib/types";
-const roleSelectOptions = roleOptions.map((role) => ({
-  value: role,
-  label: role,
-}));
+const roleSelectOptions = roleOptions
+  .filter((role) => role !== "Vendor")
+  .map((role) => ({
+    value: role,
+    label: role,
+  }));
 const statusOptions = [
   { value: "active", label: "Active" },
   { value: "invited", label: "Invited" },
@@ -32,6 +34,7 @@ export default function AdminTeamSettingsPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AdminRole>("Support");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const members = state.team;
   const activeCount = members.filter(
     (member) => member.status === "active",
@@ -56,6 +59,7 @@ export default function AdminTeamSettingsPage() {
   async function handleAdd(event: React.FormEvent) {
     try {
       event.preventDefault();
+      if (busy) return;
       const trimmedName = name.trim();
       const trimmedEmail = email.trim();
       if (!trimmedName) {
@@ -66,6 +70,7 @@ export default function AdminTeamSettingsPage() {
         setError("Enter a valid email address.");
         return;
       }
+      setBusy(true);
       await actions.addTeamMember({
         name: trimmedName,
         email: trimmedEmail,
@@ -78,7 +83,15 @@ export default function AdminTeamSettingsPage() {
       setEmail("");
       setRole("Support");
       setError("");
-    } catch (error) {}
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not add this team member.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <>
@@ -87,7 +100,7 @@ export default function AdminTeamSettingsPage() {
         title="Team & access"
         description={`${plural(members.length, "member")} · ${activeCount} active · ${invitedCount} invited · authorized operators`}
         action={
-          <Link className="admin-btn ghost" href="/admin/settings">
+          <Link className="admin-btn quiet" href="/admin/settings">
             All settings
           </Link>
         }
@@ -126,14 +139,24 @@ export default function AdminTeamSettingsPage() {
                   >
                     {member.email}
                   </span>
-                  <AdminSelect
-                    label={`Role for ${member.name}`}
-                    value={member.role}
-                    options={roleSelectOptions}
-                    onChange={(value) =>
-                      changeRole(member.id, member.name, value)
-                    }
-                  />
+                  {member.role === "Vendor" ? (
+                    <span>
+                      Vendor
+                      <br />
+                      <small style={{ color: "var(--muted)" }}>
+                        Manage from the linked supplier
+                      </small>
+                    </span>
+                  ) : (
+                    <AdminSelect
+                      label={`Role for ${member.name}`}
+                      value={member.role}
+                      options={roleSelectOptions}
+                      onChange={(value) =>
+                        changeRole(member.id, member.name, value)
+                      }
+                    />
+                  )}
                   <AdminSelect
                     label={`Status for ${member.name}`}
                     value={member.status}
@@ -200,8 +223,12 @@ export default function AdminTeamSettingsPage() {
             ) : null}
 
             <div className="form-actions">
-              <button type="submit" className="primary">
-                Add team member
+              <button
+                type="submit"
+                className="admin-btn primary"
+                disabled={busy}
+              >
+                {busy ? "Adding…" : "Add team member"}
               </button>
             </div>
           </form>

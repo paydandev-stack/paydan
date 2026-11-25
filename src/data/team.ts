@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 import type {
   AdminRole,
   AuditEntry,
@@ -55,6 +55,7 @@ export const roleOptions: AdminRole[] = [
   "Order Manager",
   "Procurement Manager",
   "Support",
+  "Vendor",
 ];
 
 export const storeSettings: StoreSettings = {

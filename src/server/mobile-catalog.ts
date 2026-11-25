@@ -19,7 +19,9 @@ const cursorSchema = z.object({
 function cursorState(cursor: string | undefined) {
   if (!cursor) return { offset: 0, asOf: new Date().toISOString() };
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    );
     return cursorSchema.parse(parsed);
   } catch {
     throw new HttpError(400, "Invalid catalogue cursor.");
@@ -122,10 +124,13 @@ AND p.updated_at <= $8::timestamptz`;
     Boolean(user),
   ];
   const result = await database().query(
-    `SELECT p.data, count(*) OVER()::int AS total
+    `SELECT p.data, v.data->>'name' AS vendor_name,
+            count(*) OVER()::int AS total
 FROM commerce_record p
 JOIN commerce_record c
 ON c.kind='categories' AND c.id=p.data->>'categorySlug'
+LEFT JOIN commerce_record v
+ON v.kind='vendors' AND v.id=p.data->>'vendorId'
 WHERE ${filters}
 ORDER BY ${orderBy}
 OFFSET $9 LIMIT $10`,
@@ -140,15 +145,19 @@ OFFSET $9 LIMIT $10`,
   );
   const hasMore = result.rows.length > input.limit;
   const rows = result.rows.slice(0, input.limit);
-  const products = rows.map((row) =>
-    user
-      ? toMemberProduct(row.data as Product)
-      : toPublicProduct(row.data as Product),
-  );
+  const products = rows.map((row) => {
+    const product = {
+      ...(row.data as Product),
+      vendorName: row.vendor_name || undefined,
+    };
+    return user ? toMemberProduct(product) : toPublicProduct(product);
+  });
   return {
     products,
     total: Number(rows[0]?.total ?? 0),
-    nextCursor: hasMore ? nextCursor(cursor.offset + input.limit, cursor.asOf) : null,
+    nextCursor: hasMore
+      ? nextCursor(cursor.offset + input.limit, cursor.asOf)
+      : null,
   };
 }
 
@@ -161,10 +170,12 @@ export async function productDetail(user: Viewer | null, slug: string) {
     .parse(slug);
   const scope = productScope(user);
   const result = await database().query(
-    `SELECT p.data
+    `SELECT p.data, v.data->>'name' AS vendor_name
 FROM commerce_record p
 JOIN commerce_record c
 ON c.kind='categories' AND c.id=p.data->>'categorySlug'
+LEFT JOIN commerce_record v
+ON v.kind='vendors' AND v.id=p.data->>'vendorId'
 WHERE p.kind=$2
 AND ($3::text IS NULL OR p.owner_id=$3)
 AND p.data->>'slug'=$1
@@ -175,13 +186,20 @@ AND NOT COALESCE((c.data->>'restricted')::boolean,false)
 LIMIT 1`,
     [clean, scope.kind, scope.owner],
   );
-  const product = result.rows[0]?.data as Product | undefined;
+  const product = result.rows[0]?.data
+    ? ({
+        ...(result.rows[0].data as Product),
+        vendorName: result.rows[0].vendor_name || undefined,
+      } satisfies Product)
+    : undefined;
   if (!product) throw new HttpError(404, "Product not found.");
   const relatedResult = await database().query(
-    `SELECT p.data
+    `SELECT p.data, v.data->>'name' AS vendor_name
 FROM commerce_record p
 JOIN commerce_record c
 ON c.kind='categories' AND c.id=p.data->>'categorySlug'
+LEFT JOIN commerce_record v
+ON v.kind='vendors' AND v.id=p.data->>'vendorId'
 WHERE p.kind=$3
 AND ($4::text IS NULL OR p.owner_id=$4)
 AND p.id<>$1
@@ -199,6 +217,11 @@ LIMIT 5`,
     user ? toMemberProduct(value) : toPublicProduct(value);
   return {
     product: project(product),
-    related: relatedResult.rows.map((row) => project(row.data as Product)),
+    related: relatedResult.rows.map((row) =>
+      project({
+        ...(row.data as Product),
+        vendorName: row.vendor_name || undefined,
+      }),
+    ),
   };
 }

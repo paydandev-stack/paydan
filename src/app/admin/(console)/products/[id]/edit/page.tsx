@@ -1,12 +1,16 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { notFound, useParams, useRouter } from "next/navigation";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { MediaUpload } from "@/components/media-upload";
+import { api } from "@/lib/api-client";
+import { getAdminRecords, putAdminRecord } from "@/lib/admin-records";
 import { useDemo } from "@/lib/store";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import { AdminTextArea, AdminTextField } from "@/components/admin/data-table";
+import { StatusBadge } from "@/components/admin/admin-controls";
 import { formatDateTime, plural } from "@/lib/format";
+import { readinessForForm } from "@/lib/product-readiness";
 import { availabilityMeta, productStatusMeta } from "@/lib/status";
 import type {
   Availability,
@@ -29,6 +33,8 @@ type ProductForm = {
   subcategorySlug: string;
   brand: string;
   description: string;
+  seoTitle: string;
+  seoDescription: string;
   price: string;
   compareAt: string;
   costPrice: string;
@@ -41,6 +47,13 @@ type ProductForm = {
   highlights: string;
   specifications: string;
   variants: VariantRow[];
+};
+type PublishSchedule = {
+  id: string;
+  productId: string;
+  publishAt: string;
+  status: "scheduled" | "published" | "blocked" | "cancelled";
+  issues?: string[];
 };
 function rowKey(): string {
   return `r-${Math.random().toString(36).slice(2, 9)}`;
@@ -82,6 +95,8 @@ function toForm(
     subcategorySlug: product.subcategorySlug ?? "",
     brand: product.brand,
     description: product.description,
+    seoTitle: product.seoTitle ?? "",
+    seoDescription: product.seoDescription ?? "",
     price: String(product.price),
     compareAt: product.compareAt ? String(product.compareAt) : "",
     costPrice: String(product.costPrice),
@@ -113,6 +128,8 @@ function blankForm(categorySlug: string, vendorId: string): ProductForm {
     subcategorySlug: "",
     brand: "",
     description: "",
+    seoTitle: "",
+    seoDescription: "",
     price: "",
     compareAt: "",
     costPrice: "",
@@ -131,6 +148,7 @@ function blankForm(categorySlug: string, vendorId: string): ProductForm {
 function SelectField({
   label,
   hint,
+  error,
   wide,
   options,
   value,
@@ -138,6 +156,7 @@ function SelectField({
 }: {
   label: string;
   hint?: string;
+  error?: string;
   wide?: boolean;
   options: {
     value: string;
@@ -162,7 +181,11 @@ function SelectField({
           </option>
         ))}
       </select>
-      {hint ? <small>{hint}</small> : null}
+      {error ? (
+        <small className="admin-field-error">{error}</small>
+      ) : hint ? (
+        <small>{hint}</small>
+      ) : null}
     </div>
   );
 }
@@ -202,6 +225,7 @@ export default function AdminEditProductPage() {
       : blankForm(state.categories[0]?.slug ?? "", ""),
   );
   const [images, setImages] = useState<string[]>(() => product?.images ?? []);
+  const [saving, setSaving] = useState(false);
   const [imageAlts, setImageAlts] = useState<Record<string, string>>(
     () => product?.imageAlts ?? {},
   );
@@ -218,9 +242,32 @@ export default function AdminEditProductPage() {
       ),
     }));
   }
+  const formErrors = {
+    name: form.name.trim() ? undefined : "Add a product name.",
+    category: form.categorySlug ? undefined : "Choose a category.",
+    vendorId: form.vendorId ? undefined : "Assign a supplying vendor.",
+    price:
+      parseAmount(form.price) !== null &&
+      (parseAmount(form.price) as number) > 0
+        ? undefined
+        : "Add a selling price greater than zero.",
+    compareAt:
+      parseAmount(form.compareAt) === null ||
+      (parseAmount(form.compareAt) as number) > (parseAmount(form.price) ?? 0)
+        ? undefined
+        : "Compare-at price must be higher than selling price.",
+    costPrice:
+      parseAmount(form.costPrice) !== null &&
+      (parseAmount(form.costPrice) as number) > 0
+        ? undefined
+        : "Add the unit cost price.",
+    description: form.description.trim() ? undefined : "Add a description.",
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     try {
       event.preventDefault();
+      setSaving(true);
       const name = form.name.trim();
       const brand = form.brand.trim();
       const price = parseAmount(form.price);
@@ -323,7 +370,14 @@ export default function AdminEditProductPage() {
       setConfirmArchive(false);
       set("status", updated.status);
       router.push("/admin/products");
-    } catch (error) {}
+    } catch (error) {
+      actions.notify(
+        error instanceof Error ? error.message : "Could not save product.",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const categoryName =
     state.categories.find((item) => item.slug === product.categorySlug)?.name ??
@@ -335,6 +389,17 @@ export default function AdminEditProductPage() {
     product.price > 0
       ? Math.round(((product.price - product.costPrice) / product.price) * 100)
       : null;
+  const readinessIssues = readinessForForm({
+    images,
+    description: form.description,
+    price: parseAmount(form.price) ?? 0,
+    costPrice: parseAmount(form.costPrice) ?? undefined,
+    vendorId: form.vendorId,
+    categorySlug: form.categorySlug,
+    restricted: form.restricted,
+    category: state.categories.find((item) => item.slug === form.categorySlug),
+  });
+
   return (
     <>
       <AdminPageHeader
@@ -350,73 +415,25 @@ export default function AdminEditProductPage() {
 
       <form onSubmit={handleSubmit}>
         <MediaUpload
+          title="Product photos"
+          maxFiles={12}
+          images={images}
+          alts={imageAlts}
           onUploaded={(url) => setImages((current) => [...current, url])}
+          onRemove={(url) =>
+            setImages((current) => current.filter((item) => item !== url))
+          }
+          onAltChange={(url, alt) =>
+            setImageAlts((current) => ({ ...current, [url]: alt }))
+          }
+          onMove={(from, to) =>
+            setImages((current) => {
+              const next = [...current];
+              [next[from], next[to]] = [next[to], next[from]];
+              return next;
+            })
+          }
         />
-        <div>
-          {images.map((url, index) => (
-            <div key={url}>
-              <img
-                src={url}
-                alt={imageAlts[url] || "Product image"}
-                width={70}
-                height={70}
-              />
-              <label>
-                Alt text
-                <input
-                  value={imageAlts[url] ?? ""}
-                  onChange={(event) =>
-                    setImageAlts((current) => ({
-                      ...current,
-                      [url]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <button
-                type="button"
-                disabled={index === 0}
-                onClick={() =>
-                  setImages((current) => {
-                    const next = [...current];
-                    [next[index - 1], next[index]] = [
-                      next[index],
-                      next[index - 1],
-                    ];
-                    return next;
-                  })
-                }
-              >
-                Move up
-              </button>
-              <button
-                type="button"
-                disabled={index === images.length - 1}
-                onClick={() =>
-                  setImages((current) => {
-                    const next = [...current];
-                    [next[index], next[index + 1]] = [
-                      next[index + 1],
-                      next[index],
-                    ];
-                    return next;
-                  })
-                }
-              >
-                Move down
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setImages((current) => current.filter((i) => i !== url))
-                }
-              >
-                Remove image
-              </button>
-              {index === 0 ? <small>Primary image</small> : null}
-            </div>
-          ))}
-        </div>
         <div className="admin-panels wide">
           <section className="admin-card">
             <h2>Listing details</h2>
@@ -424,6 +441,7 @@ export default function AdminEditProductPage() {
               <AdminTextField
                 wide
                 label="Product name"
+                error={formErrors.name}
                 value={form.name}
                 onChange={(event) => set("name", event.target.value)}
               />
@@ -440,6 +458,7 @@ export default function AdminEditProductPage() {
               />
               <SelectField
                 label="Category"
+                error={formErrors.category}
                 value={form.categorySlug}
                 onChange={(value) => {
                   set("categorySlug", value);
@@ -465,17 +484,19 @@ export default function AdminEditProductPage() {
                 ]}
               />
               <SelectField
-                label="Supplying vendor"
+                label="Product vendor"
+                error={formErrors.vendorId}
                 value={form.vendorId}
                 onChange={(value) => set("vendorId", value)}
                 options={state.vendors.map((item) => ({
                   value: item.id,
                   label: item.name,
                 }))}
-                hint="Internal field — never shown to shoppers."
+                hint="The selected vendor name appears on the storefront product card."
               />
               <AdminTextField
                 label="Price (₦)"
+                error={formErrors.price}
                 type="number"
                 min={0}
                 step={1}
@@ -485,6 +506,7 @@ export default function AdminEditProductPage() {
               />
               <AdminTextField
                 label="Compare-at price (₦)"
+                error={formErrors.compareAt}
                 type="number"
                 min={0}
                 step={1}
@@ -495,6 +517,7 @@ export default function AdminEditProductPage() {
               />
               <AdminTextField
                 label="Unit cost price (₦)"
+                error={formErrors.costPrice}
                 type="number"
                 min={0}
                 step={1}
@@ -530,8 +553,26 @@ export default function AdminEditProductPage() {
                 wide
                 label="Description"
                 rows={4}
+                error={formErrors.description}
                 value={form.description}
                 onChange={(event) => set("description", event.target.value)}
+              />
+              <AdminTextField
+                wide
+                label="SEO title"
+                value={form.seoTitle}
+                maxLength={70}
+                placeholder="Defaults to the product name when left blank"
+                onChange={(event) => set("seoTitle", event.target.value)}
+              />
+              <AdminTextArea
+                wide
+                label="SEO description"
+                rows={3}
+                maxLength={160}
+                value={form.seoDescription}
+                placeholder="A short search-result summary for this product"
+                onChange={(event) => set("seoDescription", event.target.value)}
               />
               <AdminTextArea
                 wide
@@ -775,10 +816,47 @@ export default function AdminEditProductPage() {
           </section>
         </div>
 
-        <div className="form-actions">
-          <Link href="/admin/products">Cancel</Link>
-          <button type="submit" className="primary">
-            Save changes
+        {readinessIssues.length > 0 ? (
+          <div className="admin-note" style={{ marginBottom: "1rem" }}>
+            <strong>Publish readiness</strong>
+            <ul style={{ margin: "0.5rem 0 0 1.2rem", padding: 0 }}>
+              {readinessIssues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="admin-notice" style={{ marginBottom: "1rem" }}>
+            Ready to publish.
+          </div>
+        )}
+
+        <div className="admin-sticky-actions">
+          <span className="admin-form-state" role="status">
+            {saving
+              ? "Saving changes…"
+              : form.status === "published"
+                ? "Live on storefront"
+                : "Draft"}
+          </span>
+          <Link className="admin-btn quiet" href="/admin/products">
+            Cancel
+          </Link>
+          <button
+            type="submit"
+            className="admin-btn secondary"
+            disabled={saving}
+            onClick={() => set("status", "draft")}
+          >
+            Save draft
+          </button>
+          <button
+            type="submit"
+            className="admin-btn primary"
+            disabled={saving}
+            onClick={() => set("status", "published")}
+          >
+            Save & publish
           </button>
         </div>
       </form>

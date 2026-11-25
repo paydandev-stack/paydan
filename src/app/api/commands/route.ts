@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { revalidateTag } from "next/cache";
 import { command } from "@/server/commands";
 import { PUBLIC_CATALOG_CACHE_TAG } from "@/server/public-catalog";
@@ -34,6 +34,8 @@ export async function POST(request: Request) {
         "saveBanner",
         "toggleBanner",
         "updateSettings",
+        "saveVendorProduct",
+        "saveVendorStock",
       ]).has(input.name)
     )
       revalidateTag(PUBLIC_CATALOG_CACHE_TAG, { expire: 0 });

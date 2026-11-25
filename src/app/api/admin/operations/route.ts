@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { database } from "@/server/db";
+import { database, put, records, transaction } from "@/server/db";
 import {
   body,
   failure,
+  HttpError,
   json,
   requireCapability,
   sameOrigin,
@@ -34,6 +35,9 @@ export async function GET(request: Request) {
       database().query(
         `SELECT
           count(*) FILTER (WHERE status='pending') AS pending,
+          count(*) FILTER (
+            WHERE status='pending' AND created_at < now() - interval '30 minutes'
+          ) AS stale,
           min(created_at) FILTER (WHERE status='pending') AS oldest
          FROM payment`,
       ),
@@ -55,6 +59,37 @@ export async function GET(request: Request) {
          FROM worker_run ORDER BY started_at DESC LIMIT 20`,
       ),
     ]);
+    const trends = runs.rows.map((run) => ({
+      worker: run.worker,
+      status: run.status,
+      durationMs: run.completed_at
+        ? Math.round(Date.parse(run.completed_at) - Date.parse(run.started_at))
+        : null,
+      errorClass: run.error_class,
+      startedAt: run.started_at,
+    }));
+    const schedules = [
+      { worker: "mail", cadence: "Every 5 minutes", nextRun: nextRun(5) },
+      { worker: "payments", cadence: "Every 15 minutes", nextRun: nextRun(15) },
+      { worker: "push", cadence: "Every 5 minutes", nextRun: nextRun(5) },
+      {
+        worker: "products",
+        cadence: "Every 10 minutes",
+        nextRun: nextRun(10),
+      },
+      {
+        worker: "sourcing",
+        cadence: "Every 15 minutes",
+        nextRun: nextRun(15),
+      },
+      { worker: "media", cadence: "Every 24 hours", nextRun: nextRun(1440) },
+      { worker: "push", cadence: "Every 5 minutes", nextRun: nextRun(5) },
+      {
+        worker: "product-publishing",
+        cadence: "Every 10 minutes",
+        nextRun: nextRun(10),
+      },
+    ];
     return json({
       mail: mail.rows[0],
       deadMail: deadMail.rows.map((item) => ({
@@ -77,6 +112,9 @@ export async function GET(request: Request) {
         metrics: run.metrics,
         errorClass: run.error_class,
       })),
+      trends,
+      schedules,
+      alerts: await records(database(), "jobAlerts"),
     });
   } catch (error) {
     return failure(error);
@@ -88,11 +126,45 @@ export async function POST(request: Request) {
     sameOrigin(request);
     const user = await viewer(request.headers);
     requireCapability(user, "jobs.retry");
-    const { worker } = z
+    const input = z
       .object({
-        worker: z.enum(["mail", "payments", "media", "retry-dead-mail"]),
+        worker: z
+          .enum(["mail", "payments", "media", "retry-dead-mail", "retry-one"])
+          .optional(),
+        mailId: z.string().uuid().optional(),
+        alert: z
+          .object({
+            id: z.string().max(150),
+            title: z.string().min(1).max(200),
+            channel: z.string().min(1).max(100),
+            enabled: z.boolean().default(true),
+          })
+          .optional(),
       })
       .parse(await body(request));
+    if (input.alert) {
+      const alert = {
+        ...input.alert,
+        updatedAt: new Date().toISOString(),
+        updatedBy: user!.email,
+      };
+      await transaction(async (db) => {
+        await put(db, "jobAlerts", alert.id, alert, user!.id);
+        await writeAudit(db, {
+          actor: user!.email,
+          action: "jobs.alert",
+          record: alert.id,
+          capability: "jobs.retry",
+          source: "admin",
+          after: alert,
+        });
+      });
+      return json({ saved: true });
+    }
+    const worker = input.worker;
+    if (!worker) throw new HttpError(400, "Choose a worker or alert.");
+    if (worker === "retry-one" && !input.mailId)
+      throw new HttpError(400, "Choose a message to retry.");
     const result =
       worker === "mail"
         ? await runRecordedWorker("mail", () => processMailBatch(25))
@@ -101,11 +173,18 @@ export async function POST(request: Request) {
               const retried = await retryDeadMail(25);
               return { retried, ...(await processMailBatch(25)) };
             })
-          : worker === "media"
-            ? await runRecordedWorker("media", () =>
-                cleanupOrphanedCatalogMedia(100),
-              )
-            : await runRecordedWorker("payments", () => reconcilePayments(50));
+          : worker === "retry-one"
+            ? await runRecordedWorker("mail", async () => {
+                const retried = await retryDeadMail(1, input.mailId);
+                return { retried, ...(await processMailBatch(25)) };
+              })
+            : worker === "media"
+              ? await runRecordedWorker("media", () =>
+                  cleanupOrphanedCatalogMedia(100),
+                )
+              : await runRecordedWorker("payments", () =>
+                  reconcilePayments(50),
+                );
     await writeAudit(database(), {
       actor: user!.email,
       action: "worker.manual-run",
@@ -118,4 +197,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return failure(error);
   }
+}
+
+function nextRun(minutes: number) {
+  const date = new Date(Date.now() + minutes * 60_000);
+  date.setSeconds(0, 0);
+  return date.toISOString();
 }

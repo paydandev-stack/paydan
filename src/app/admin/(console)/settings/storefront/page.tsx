@@ -44,6 +44,7 @@ export default function AdminStorefrontSettingsPage() {
     formFromSettings(settings),
   );
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   // Keep the draft in step with settings coming from outside this form
   // (another screen, or "reset demonstration data").
   useEffect(() => {
@@ -63,6 +64,7 @@ export default function AdminStorefrontSettingsPage() {
   async function handleSave(event: React.FormEvent) {
     try {
       event.preventDefault();
+      if (saving) return;
       if (!form.storeName.trim()) {
         setError("The store name cannot be empty.");
         return;
@@ -83,6 +85,7 @@ export default function AdminStorefrontSettingsPage() {
           setError("Enter valid operational notification email addresses.");
           return;
         }
+      setSaving(true);
       await actions.updateSettings({
         storeName: form.storeName.trim(),
         supportEmail: form.supportEmail.trim(),
@@ -94,7 +97,15 @@ export default function AdminStorefrontSettingsPage() {
       });
       actions.notify("Storefront settings saved");
       setError("");
-    } catch (error) {}
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not save storefront settings.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
   function handleDiscard() {
     setForm(formFromSettings(settings));
@@ -107,7 +118,7 @@ export default function AdminStorefrontSettingsPage() {
         title="Storefront"
         description={`${settings.storeName} · announcement, support contact and business hours · stored centrally in PostgreSQL`}
         action={
-          <Link className="admin-btn ghost" href="/admin/settings">
+          <Link className="admin-btn quiet" href="/admin/settings">
             All settings
           </Link>
         }
@@ -192,11 +203,24 @@ export default function AdminStorefrontSettingsPage() {
             ) : null}
 
             <div className="form-actions">
-              <button type="button" onClick={handleDiscard} disabled={!dirty}>
+              <button
+                type="button"
+                className="admin-btn quiet"
+                onClick={handleDiscard}
+                disabled={!dirty || saving}
+              >
                 Discard changes
               </button>
-              <button type="submit" className="primary" disabled={!dirty}>
-                {dirty ? "Save storefront settings" : "No changes to save"}
+              <button
+                type="submit"
+                className="admin-btn primary"
+                disabled={!dirty || saving}
+              >
+                {saving
+                  ? "Saving…"
+                  : dirty
+                    ? "Save storefront settings"
+                    : "No changes to save"}
               </button>
             </div>
           </form>

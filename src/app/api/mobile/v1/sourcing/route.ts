@@ -70,7 +70,9 @@ export async function POST(request: Request) {
         scopedRecordKind(user, "sourcing"),
         requestId,
       );
-      return mobileJson({ sourcing: updated ? customerRequest(updated) : null });
+      return mobileJson({
+        sourcing: updated ? customerRequest(updated) : null,
+      });
     }
     const parsed = sourcingSubmitSchema.parse(raw);
     const value = sourcing.parse({

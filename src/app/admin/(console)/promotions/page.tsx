@@ -18,6 +18,14 @@ type VoucherDraft = {
   value: string;
   minimum: string;
   description: string;
+  startAt: string;
+  endAt: string;
+  usageLimit: string;
+  perCustomerLimit: string;
+  budgetCap: string;
+  categorySlugs: string[];
+  productIds: string[];
+  stackingAllowed: boolean;
 };
 const blankDraft: VoucherDraft = {
   code: "",
@@ -25,6 +33,14 @@ const blankDraft: VoucherDraft = {
   value: "",
   minimum: "",
   description: "",
+  startAt: "",
+  endAt: "",
+  usageLimit: "",
+  perCustomerLimit: "",
+  budgetCap: "",
+  categorySlugs: [],
+  productIds: [],
+  stackingAllowed: false,
 };
 function discountLabel(voucher: Voucher): string {
   return voucher.type === "fixed"
@@ -44,6 +60,19 @@ export default function AdminPromotionsPage() {
       value: String(voucher.value),
       minimum: String(voucher.minimum),
       description: voucher.description,
+      startAt: voucher.startAt?.slice(0, 10) ?? "",
+      endAt: voucher.endAt?.slice(0, 10) ?? "",
+      usageLimit:
+        voucher.usageLimit === undefined ? "" : String(voucher.usageLimit),
+      perCustomerLimit:
+        voucher.perCustomerLimit === undefined
+          ? ""
+          : String(voucher.perCustomerLimit),
+      budgetCap:
+        voucher.budgetCap === undefined ? "" : String(voucher.budgetCap),
+      categorySlugs: voucher.categorySlugs ?? [],
+      productIds: voucher.productIds ?? [],
+      stackingAllowed: voucher.stackingAllowed ?? false,
     });
   };
   const cancelEdit = () => {
@@ -76,6 +105,34 @@ export default function AdminPromotionsPage() {
         actions.notify("Minimum order must be zero or more.", "error");
         return;
       }
+      if (draft.startAt && draft.endAt && draft.endAt < draft.startAt) {
+        actions.notify(
+          "The promotion end date must follow its start date.",
+          "error",
+        );
+        return;
+      }
+      const integerOrUndefined = (input: string) =>
+        input.trim() === ""
+          ? undefined
+          : Math.max(0, Math.floor(Number(input)));
+      const usageLimit = integerOrUndefined(draft.usageLimit);
+      const perCustomerLimit = integerOrUndefined(draft.perCustomerLimit);
+      const budgetCap =
+        draft.budgetCap.trim() === "" ? undefined : Number(draft.budgetCap);
+      if (
+        (usageLimit !== undefined && !Number.isFinite(usageLimit)) ||
+        (perCustomerLimit !== undefined &&
+          !Number.isFinite(perCustomerLimit)) ||
+        (budgetCap !== undefined &&
+          (!Number.isFinite(budgetCap) || budgetCap < 0))
+      ) {
+        actions.notify(
+          "Usage and budget limits must be valid positive numbers.",
+          "error",
+        );
+        return;
+      }
       if (editingCode === null) {
         const clash = state.vouchers.find(
           (item) => item.code.toUpperCase() === code,
@@ -100,6 +157,16 @@ export default function AdminPromotionsPage() {
         minimum,
         description: draft.description.trim(),
         active: existing?.active ?? true,
+        ...(draft.startAt ? { startAt: `${draft.startAt}T00:00:00.000Z` } : {}),
+        ...(draft.endAt ? { endAt: `${draft.endAt}T23:59:59.999Z` } : {}),
+        usageLimit,
+        usageCount: existing?.usageCount ?? 0,
+        perCustomerLimit,
+        budgetCap,
+        discountUsed: existing?.discountUsed ?? 0,
+        categorySlugs: draft.categorySlugs,
+        productIds: draft.productIds,
+        stackingAllowed: draft.stackingAllowed,
       };
       await actions.saveVoucher(voucher);
       cancelEdit();
@@ -142,8 +209,15 @@ export default function AdminPromotionsPage() {
         />
       ) : (
         <AdminTable
-          template=".9fr .9fr .9fr 1.2fr 1fr"
-          head={["Code", "Discount", "Minimum order", "Description", "Actions"]}
+          template=".8fr .8fr .9fr 1fr 1fr 1fr"
+          head={[
+            "Code",
+            "Discount",
+            "Minimum order",
+            "Redemptions",
+            "Budget / revenue",
+            "Actions",
+          ]}
           caption="Voucher codes with their discount, threshold, status toggle and edit action"
         >
           {state.vouchers.map((voucher) => (
@@ -153,8 +227,30 @@ export default function AdminPromotionsPage() {
               <span>
                 {voucher.minimum > 0 ? money(voucher.minimum) : "No minimum"}
               </span>
-              <span style={{ color: "var(--muted)" }}>
-                {voucher.description}
+              <span>
+                {voucher.usageCount ?? 0}
+                {voucher.usageLimit === undefined
+                  ? ""
+                  : ` / ${voucher.usageLimit}`}
+                <small style={{ display: "block", color: "var(--muted)" }}>
+                  {voucher.perCustomerLimit === undefined
+                    ? "No customer cap"
+                    : `${voucher.perCustomerLimit} per customer`}
+                </small>
+              </span>
+              <span>
+                {money(voucher.discountUsed ?? 0)} used
+                {voucher.budgetCap === undefined
+                  ? ""
+                  : ` / ${money(voucher.budgetCap)}`}
+                <small style={{ display: "block", color: "var(--muted)" }}>
+                  {money(
+                    state.orders
+                      .filter((order) => order.voucherCode === voucher.code)
+                      .reduce((sum, order) => sum + order.total, 0),
+                  )}{" "}
+                  influenced
+                </small>
               </span>
               <span
                 style={{
@@ -255,13 +351,123 @@ export default function AdminPromotionsPage() {
               setDraft({ ...draft, description: event.target.value })
             }
           />
+          <AdminTextField
+            label="Starts"
+            type="date"
+            value={draft.startAt}
+            onChange={(event) =>
+              setDraft({ ...draft, startAt: event.target.value })
+            }
+          />
+          <AdminTextField
+            label="Ends"
+            type="date"
+            value={draft.endAt}
+            onChange={(event) =>
+              setDraft({ ...draft, endAt: event.target.value })
+            }
+          />
+          <AdminTextField
+            label="Total usage limit"
+            type="number"
+            min={0}
+            hint="Blank means unlimited."
+            value={draft.usageLimit}
+            onChange={(event) =>
+              setDraft({ ...draft, usageLimit: event.target.value })
+            }
+          />
+          <AdminTextField
+            label="Per-customer limit"
+            type="number"
+            min={0}
+            hint="Blank means unlimited."
+            value={draft.perCustomerLimit}
+            onChange={(event) =>
+              setDraft({ ...draft, perCustomerLimit: event.target.value })
+            }
+          />
+          <AdminTextField
+            label="Discount budget (₦)"
+            type="number"
+            min={0}
+            hint="Checkout stops the code before this cap is exceeded."
+            value={draft.budgetCap}
+            onChange={(event) =>
+              setDraft({ ...draft, budgetCap: event.target.value })
+            }
+          />
+          <label className="admin-field wide">
+            Eligible categories
+            <select
+              className="admin-select"
+              multiple
+              value={draft.categorySlugs}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  categorySlugs: [...event.target.selectedOptions].map(
+                    (option) => option.value,
+                  ),
+                })
+              }
+            >
+              {state.categories.map((category) => (
+                <option key={category.slug} value={category.slug}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <small>No selection allows every category.</small>
+          </label>
+          <label className="admin-field wide">
+            Eligible products
+            <select
+              className="admin-select"
+              multiple
+              value={draft.productIds}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  productIds: [...event.target.selectedOptions].map(
+                    (option) => option.value,
+                  ),
+                })
+              }
+            >
+              {state.products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                </option>
+              ))}
+            </select>
+            <small>
+              No selection allows every product in the selected categories.
+            </small>
+          </label>
+          <label className={`choice${draft.stackingAllowed ? " active" : ""}`}>
+            <input
+              type="checkbox"
+              checked={draft.stackingAllowed}
+              onChange={(event) =>
+                setDraft({ ...draft, stackingAllowed: event.target.checked })
+              }
+            />
+            <span>
+              Allow stacking
+              <small>
+                The current checkout accepts one code; this records future
+                stacking policy.
+              </small>
+            </span>
+          </label>
           <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
             {editingCode !== null ? (
               <button type="button" onClick={cancelEdit}>
                 Cancel
               </button>
             ) : null}
-            <button type="submit" className="primary">
+            <button type="submit" className="admin-btn primary">
               {editingCode !== null ? "Save changes" : "Create voucher"}
             </button>
           </div>

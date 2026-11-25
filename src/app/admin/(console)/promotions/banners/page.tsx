@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { MediaUpload } from "@/components/media-upload";
+import { MediaPicker } from "@/components/admin/media-picker";
 import { useDemo } from "@/lib/store";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -20,6 +20,7 @@ type BannerDraft = {
   image: string;
   altText: string;
   placement: Banner["placement"];
+  priority: string;
   startAt: string; // yyyy-mm-dd for <input type="date">
   endAt: string;
 };
@@ -38,6 +39,7 @@ function blankDraft(): BannerDraft {
     image: "",
     altText: "",
     placement: "hero",
+    priority: "0",
     startAt: isoDay(0),
     endAt: isoDay(30),
   };
@@ -52,6 +54,7 @@ function toDraft(banner: Banner): BannerDraft {
     image: banner.image,
     altText: banner.altText ?? "",
     placement: banner.placement,
+    priority: String(banner.priority ?? 0),
     startAt: banner.startAt.slice(0, 10),
     endAt: banner.endAt.slice(0, 10),
   };
@@ -119,6 +122,15 @@ function BannerFields({
         ]}
       />
       <AdminTextField
+        label="Priority"
+        type="number"
+        min={0}
+        max={1000}
+        hint="Higher numbers appear first within the same placement."
+        value={value.priority}
+        onChange={(event) => onChange({ priority: event.target.value })}
+      />
+      <AdminTextField
         label="Starts"
         type="date"
         required
@@ -146,6 +158,7 @@ function applyDraft(banner: Banner, draft: BannerDraft): Banner {
     image: draft.image.trim(),
     altText: draft.altText.trim(),
     placement: draft.placement,
+    priority: Math.max(0, Math.round(Number(draft.priority) || 0)),
     startAt: `${draft.startAt}T00:00:00.000Z`,
     endAt: `${draft.endAt}T23:59:59.000Z`,
   };
@@ -156,10 +169,29 @@ export default function AdminBannersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<BannerDraft>(blankDraft);
   const [createDraft, setCreateDraft] = useState<BannerDraft>(blankDraft);
+  const banners = [...state.banners].sort(
+    (left, right) => (right.priority ?? 0) - (left.priority ?? 0),
+  );
+  const overlapsFor = (banner: Banner) =>
+    state.banners.filter(
+      (candidate) =>
+        candidate.id !== banner.id &&
+        candidate.active &&
+        candidate.placement === banner.placement &&
+        Date.parse(candidate.startAt) <= Date.parse(banner.endAt) &&
+        Date.parse(candidate.endAt) >= Date.parse(banner.startAt),
+    );
   const draftValid = (draft: BannerDraft): boolean => {
     if (!draft.title.trim() || !draft.href.trim() || !draft.altText.trim()) {
       actions.notify(
         "A banner needs a title, button link and image description.",
+        "error",
+      );
+      return false;
+    }
+    if (!/^\/(?![/\\])/.test(draft.href.trim())) {
+      actions.notify(
+        "Use a valid internal path beginning with one slash.",
         "error",
       );
       return false;
@@ -208,6 +240,8 @@ export default function AdminBannersPage() {
           image: "",
           altText: "",
           placement: "hero",
+          priority: 0,
+          clickCount: 0,
           active: true,
           startAt: "",
           endAt: "",
@@ -239,7 +273,7 @@ export default function AdminBannersPage() {
         />
       ) : (
         <div className="admin-panels">
-          {state.banners.map((banner) => (
+          {banners.map((banner) => (
             <article className="admin-card" key={banner.id}>
               <div
                 style={{
@@ -273,7 +307,8 @@ export default function AdminBannersPage() {
                   <h3 style={{ margin: ".7rem 0 .3rem" }}>{banner.title}</h3>
                   <small style={{ color: "var(--muted)", fontSize: ".62rem" }}>
                     {formatDate(banner.startAt)} – {formatDate(banner.endAt)} ·{" "}
-                    {banner.eyebrow || "no eyebrow"}
+                    priority {banner.priority ?? 0} · {banner.clickCount ?? 0}{" "}
+                    clicks
                   </small>
                 </div>
                 <div className="admin-actions">
@@ -291,6 +326,30 @@ export default function AdminBannersPage() {
               <p style={{ marginTop: ".7rem" }}>
                 {banner.subtitle || "No subtitle."}
               </p>
+
+              {overlapsFor(banner).length ? (
+                <div className="admin-note" role="status">
+                  Schedule overlaps {overlapsFor(banner).length} active{" "}
+                  {banner.placement} banner
+                  {overlapsFor(banner).length === 1 ? "" : "s"}. Priority
+                  decides which appears first.
+                </div>
+              ) : null}
+
+              <div
+                style={{
+                  marginTop: ".8rem",
+                  minHeight: banner.placement === "hero" ? 180 : 120,
+                  borderRadius: "1rem",
+                  padding: "1.2rem",
+                  color: "white",
+                  background: `linear-gradient(120deg, rgba(0,30,18,.78), rgba(0,90,55,.42)), url(${banner.image}) center / cover`,
+                }}
+              >
+                <small>{banner.eyebrow}</small>
+                <h3>{banner.title}</h3>
+                <span className="admin-btn secondary">{banner.ctaLabel}</span>
+              </div>
               <p>
                 Button “{banner.ctaLabel || "—"}” → <code>{banner.href}</code>
                 {banner.image ? (
@@ -307,11 +366,14 @@ export default function AdminBannersPage() {
                   style={{ marginTop: "1rem" }}
                   onSubmit={(event) => saveEdit(event, banner)}
                 >
-                  <MediaUpload
-                    onUploaded={(url) =>
-                      setEditDraft((current) =>
-                        current ? { ...current, image: url } : current,
-                      )
+                  <MediaPicker
+                    multiple={false}
+                    value={editDraft.image ? [editDraft.image] : []}
+                    onChange={(images) =>
+                      setEditDraft((current) => ({
+                        ...current,
+                        image: images[0] ?? "",
+                      }))
                     }
                   />
                   <BannerFields
@@ -345,9 +407,14 @@ export default function AdminBannersPage() {
           schedule window you set.
         </p>
         <form className="form-grid" onSubmit={createBanner}>
-          <MediaUpload
-            onUploaded={(url) =>
-              setCreateDraft((current) => ({ ...current, image: url }))
+          <MediaPicker
+            multiple={false}
+            value={createDraft.image ? [createDraft.image] : []}
+            onChange={(images) =>
+              setCreateDraft((current) => ({
+                ...current,
+                image: images[0] ?? "",
+              }))
             }
           />
           <BannerFields

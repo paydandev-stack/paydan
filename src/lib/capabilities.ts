@@ -6,6 +6,9 @@ export type AdminCapability =
   | "catalog.read"
   | "catalog.write"
   | "customers.read"
+  | "customers.manage"
+  | "customers.delete"
+  | "customers.merge"
   | "customers.support-note"
   | "departments.write"
   | "inventory.read"
@@ -35,6 +38,9 @@ const ALL_CAPABILITIES: AdminCapability[] = [
   "catalog.read",
   "catalog.write",
   "customers.read",
+  "customers.manage",
+  "customers.delete",
+  "customers.merge",
   "customers.support-note",
   "departments.write",
   "inventory.read",
@@ -62,6 +68,7 @@ const ALL_CAPABILITIES: AdminCapability[] = [
 export const ROLE_CAPABILITIES: Record<AdminRole, readonly AdminCapability[]> =
   {
     "Super Admin": ALL_CAPABILITIES,
+    Vendor: [],
     "Catalog Manager": [
       "catalog.read",
       "catalog.write",
@@ -113,6 +120,7 @@ const ADMIN_ROUTE_CAPABILITIES: Array<
   ["/admin/settings/team", "team.manage"],
   ["/admin/settings/shipping", "shipping.write"],
   ["/admin/settings/payments", "settings.manage"],
+  ["/admin/settings/advanced", "settings.manage"],
   ["/admin/settings/storefront", "settings.manage"],
   ["/admin/settings", "settings.manage"],
   ["/admin/promotions", "promotions.write"],

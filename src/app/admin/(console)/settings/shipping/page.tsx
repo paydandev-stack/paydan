@@ -46,7 +46,13 @@ export default function Shipping() {
             <p>
               {money(z.fee)} · {z.eta} · {z.active ? "Active" : "Inactive"}
             </p>
-            <button onClick={() => setForm(z)}>Edit zone</button>
+            <button
+              type="button"
+              className="admin-btn secondary"
+              onClick={() => setForm(z)}
+            >
+              Edit zone
+            </button>
           </article>
         ))}
       </div>
@@ -91,8 +97,8 @@ export default function Shipping() {
           Active
         </label>
         <p role="status">{message}</p>
-        <button className="admin-btn" disabled={busy}>
-          Save zone
+        <button className="admin-btn primary" disabled={busy}>
+          {busy ? "Saving…" : "Save zone"}
         </button>
       </form>
     </>
