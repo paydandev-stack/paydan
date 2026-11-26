@@ -6,6 +6,7 @@ import { useDemo } from "@/lib/store";
 import { toMemberProducts } from "@/lib/catalog-dto";
 import { readIntent, clearIntent, type ShoppingIntent } from "@/lib/intent";
 import { api } from "@/lib/api-client";
+import { CloseIcon } from "@/components/icons";
 export default function Dashboard() {
   const { state, hydrated, refresh, actions } = useDemo();
   const [intent, setIntent] = useState<ShoppingIntent | null>(null);
@@ -288,7 +289,7 @@ export default function Dashboard() {
               onClick={() => setDepartmentMenuOpen(false)}
               aria-label="Close departments"
             >
-              ×
+              <CloseIcon />
             </button>
           </header>
           <nav>

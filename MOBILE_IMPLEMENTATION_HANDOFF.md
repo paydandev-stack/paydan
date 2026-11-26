@@ -71,7 +71,7 @@ Server-only configuration (never EXPO_PUBLIC_*):
 - PAYSTACK_SECRET_KEY.
 - S3, CloudFront, MEDIA_CDN_URL, CLOUDFRONT_KEY_PAIR_ID, CLOUDFRONT_PRIVATE_KEY_BASE64.
 - SMTP/Resend mail settings and webhook secrets.
-- AI_GATEWAY_API_KEY, GROQ_API_KEY, and related assistant provider settings.
+- GROQ_API_KEY, OPENROUTER_API_KEY, and related direct assistant provider settings.
 - EXPO_ACCESS_TOKEN for the server-side push outbox worker.
 
 ## Commands

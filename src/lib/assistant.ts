@@ -15,6 +15,16 @@ export type AssistantReply = {
   links?: AssistantLink[];
   /** Follow-up chips rendered after this answer. */
   starters?: string[];
+  cartProposal?: {
+    proposalId: string;
+    action:
+      | "add_to_cart"
+      | "remove_cart_line"
+      | "set_cart_quantity"
+      | "clear_cart";
+    summary: Record<string, unknown>;
+    expiresInSeconds: number;
+  };
 };
 
 export type AssistantOrder = {
@@ -486,7 +496,7 @@ export function answerFor(
 
   // 5. Sourcing / out-of-catalogue requests.
   if (
-    /(source|sourcing|don'?t (stock|carry|have)|not (stocked|available)|special order|procure|custom request)/.test(
+    /(source|sourcing|can'?t find|cannot find|don'?t (stock|carry|have)|not (stocked|available)|special order|procure|custom request)/.test(
       q,
     )
   ) {
@@ -516,7 +526,9 @@ export function answerFor(
         ],
       };
     }
-    const matches = searchProducts(stripContainers(q), ctx.products);
+    const matches = searchProducts(stripContainers(q), ctx.products).sort(
+      (left, right) => left.price - right.price,
+    );
     if (matches.length > 0) {
       return {
         text: "Here are the closest matches at your member prices:",
@@ -577,6 +589,20 @@ export function answerFor(
   }
 
   // 10. Cart and checkout.
+  if (/\bcompare\b/.test(q)) {
+    const matches = searchProducts(stripContainers(q), ctx.products).slice(0, 4);
+    if (matches.length >= 2)
+      return {
+        text: "Here are the closest catalogue matches to compare. Open each product for its verified options and availability.",
+        productIds: matches.map((product) => product.id),
+        links: [{ href: "/shop", label: "Browse the full catalogue" }],
+      };
+    return {
+      text: "I need at least two clear catalogue matches to compare without guessing. Tell me the product names or department.",
+      links: [{ href: "/shop", label: "Choose products to compare" }],
+    };
+  }
+
   if (/(cart|basket|checkout|pay for|purchase|buy now)/.test(q)) {
     if (ctx.signedIn) {
       return {
@@ -665,8 +691,8 @@ export function answerFor(
     text: "I couldn't find a reliable match in PAYDAN's catalogue. You can browse departments or request help sourcing the product.",
     starters: ASSISTANT_STARTERS,
     links: [
-      { href: "/shop", label: "Browse the catalogue" },
-      { href: "/help", label: "Help centre" },
+      { href: "/categories", label: "Browse departments" },
+      { href: "/request-product", label: "Request help sourcing it" },
     ],
   };
 }

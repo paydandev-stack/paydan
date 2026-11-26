@@ -7,7 +7,7 @@ You are completing the buyer-facing React Native version of PAYDAN. Work from th
 - Existing web/backend project: `paydan-next`.
 - Create the mobile application as a separate sibling project/repository named `paydan-mobile`; do not add Expo dependencies to the Vercel web package.
 - The Next.js application remains the backend, public web storefront and only admin/staff portal.
-- PostgreSQL/Neon, private S3, CloudFront, Paystack, transactional email, Vercel AI Gateway and Groq already belong to the server architecture.
+- PostgreSQL/Neon, private S3, CloudFront, Paystack, transactional email, direct Groq and OpenRouter already belong to the server architecture.
 - Google is the only OAuth provider.
 - Guests may browse but must not see prices. Purchasing starts after authentication.
 - Ask PAYDAN is available globally and may search/explain products or propose cart changes, but a user must explicitly confirm every mutation.

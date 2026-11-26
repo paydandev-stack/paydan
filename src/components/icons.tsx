@@ -53,6 +53,35 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+export function BellIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M18 9a6 6 0 0 0-12 0c0 7-2.5 7-2.5 8.5h17C20.5 16 18 16 18 9Z" />
+      <path d="M9.5 20a3 3 0 0 0 5 0" />
+    </Icon>
+  );
+}
+
+export function EyeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <circle cx="12" cy="12" r="2.7" />
+    </Icon>
+  );
+}
+
+export function EyeOffIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m3 3 18 18" />
+      <path d="M10.3 6.2A10.7 10.7 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.3 3" />
+      <path d="M6.2 7.1A16.5 16.5 0 0 0 2.5 12s3.5 6 9.5 6a10 10 0 0 0 3-.5" />
+      <path d="M10.2 10.2a2.7 2.7 0 0 0 3.6 3.6" />
+    </Icon>
+  );
+}
+
 export function ChevronDownIcon(props: IconProps) {
   return (
     <Icon {...props}>

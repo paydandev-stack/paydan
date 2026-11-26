@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useDemo } from "@/lib/store";
+import { ChevronDownIcon, CloseIcon } from "@/components/icons";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard" },
@@ -38,7 +39,7 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
             <small>Your account</small>
             <strong>{activeLabel}</strong>
           </span>
-          <b aria-hidden="true">⌄</b>
+          <ChevronDownIcon aria-hidden="true" />
         </button>
         <aside className={navOpen ? "open" : undefined}>
           <div className="account-nav-head">
@@ -48,7 +49,7 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
               onClick={() => setNavOpen(false)}
               aria-label="Close account menu"
             >
-              ×
+              <CloseIcon />
             </button>
           </div>
           <strong>{session ? session.name : "Guest"}</strong>

@@ -64,11 +64,11 @@ function configured(): ServiceHealth {
     },
     ai: {
       status:
-        process.env.AI_PRIMARY_MODEL || process.env.GROQ_API_KEY
+        process.env.GROQ_API_KEY || process.env.OPENROUTER_API_KEY
           ? "configured"
           : "not_configured",
       message:
-        "Use the assistant test flow to verify without accidental spend.",
+        "Direct Groq fails over to OpenRouter Free; use the assistant test flow to verify.",
     },
   };
 }

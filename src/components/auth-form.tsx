@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "@/lib/api-client";
 import { readIntent, rememberIntent, safePath } from "@/lib/intent";
+import { PasswordField } from "@/components/password-field";
 
 export function AuthForm({
   mode = "login",
@@ -10,7 +11,12 @@ export function AuthForm({
   mode?:
     "login" | "register" | "forgot" | "reset" | "verify" | "admin" | "vendor";
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
   const [invite, setInvite] = useState<{
     token: string;
     email: string;
@@ -19,6 +25,7 @@ export function AuthForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("error"))
@@ -46,6 +53,7 @@ export function AuthForm({
     }
   }, []);
   const setup = mode === "vendor" && Boolean(invite);
+  const needsConfirmation = mode === "register" || mode === "reset" || setup;
   const title =
     mode === "register"
       ? "Make yourself at home."
@@ -68,7 +76,12 @@ export function AuthForm({
     setBusy(true);
     setError("");
     setMessage("");
+    setPasswordError("");
     try {
+      if (needsConfirmation && form.password !== form.confirmPassword) {
+        setPasswordError("Passwords do not match.");
+        throw new Error("Check the password confirmation and try again.");
+      }
       if (mode === "forgot") {
         await api("/api/auth/request-password-reset", {
           email: form.email,
@@ -112,11 +125,13 @@ export function AuthForm({
         );
       } else if (mode === "register") {
         await api("/api/auth/sign-up/email", {
-          ...form,
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password,
           callbackURL: "/login",
         });
         setMessage(
-          "Your account has been created. Check your email to verify it, then sign in.",
+          "Your account has been created. We sent a verification link to your email. If it does not arrive, use Verify email below to send a new one.",
         );
       } else {
         await api("/api/auth/sign-in/email", {
@@ -255,30 +270,37 @@ export function AuthForm({
             {["login", "register", "reset", "admin", "vendor"].includes(
               mode,
             ) && (
-              <label>
-                Password
-                <input
-                  type="password"
-                  required
-                  minLength={
-                    mode === "register" || mode === "reset" || setup ? 12 : 1
-                  }
-                  maxLength={128}
-                  autoComplete={
-                    mode === "register" || mode === "reset" || setup
-                      ? "new-password"
-                      : "current-password"
-                  }
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm({ ...form, password: e.target.value })
-                  }
-                />
-                {mode === "register" || mode === "reset" || setup ? (
-                  <small>At least 12 characters.</small>
-                ) : null}
-              </label>
+              <PasswordField
+                label={mode === "reset" ? "New password" : "Password"}
+                name="password"
+                required
+                minLength={needsConfirmation ? 12 : 1}
+                maxLength={128}
+                autoComplete={needsConfirmation ? "new-password" : "current-password"}
+                value={form.password}
+                helper={needsConfirmation ? "At least 12 characters." : undefined}
+                onChange={(event) => {
+                  setPasswordError("");
+                  setForm({ ...form, password: event.target.value });
+                }}
+              />
             )}
+            {needsConfirmation ? (
+              <PasswordField
+                label={mode === "reset" ? "Confirm new password" : "Confirm password"}
+                name="confirmPassword"
+                required
+                minLength={12}
+                maxLength={128}
+                autoComplete="new-password"
+                value={form.confirmPassword}
+                error={passwordError}
+                onChange={(event) => {
+                  setPasswordError("");
+                  setForm({ ...form, confirmPassword: event.target.value });
+                }}
+              />
+            ) : null}
             {error && (
               <p role="alert" className="form-error">
                 {error}

@@ -52,6 +52,30 @@ export function customerRequest(request: SourcingRequest) {
   if (safe.quote?.status === "draft") delete safe.quote;
   return safe;
 }
+export async function fixturePublicSnapshot(): Promise<DemoState> {
+  const state = emptyState();
+  const [{ products }, { categories }, { seedBanners }, { vendors }] =
+    await Promise.all([
+      import("@/data/products"),
+      import("@/data/categories"),
+      import("@/data/promotions"),
+      import("@/data/vendors"),
+    ]);
+  const vendorNames = new Map(
+    vendors.map((vendor) => [vendor.id, vendor.name]),
+  );
+  state.products = products
+    .filter((product) => product.status === "published" && !product.restricted)
+    .map((product) =>
+      toPublicProduct({
+        ...product,
+        vendorName: vendorNames.get(product.vendorId),
+      }),
+    ) as unknown as Product[];
+  state.categories = categories.filter(isCustomerVisibleCategory);
+  state.banners = seedBanners;
+  return state;
+}
 export async function snapshot(
   user: Viewer | null,
   admin = false,
@@ -59,29 +83,7 @@ export async function snapshot(
   const state = emptyState();
   // A disconnected installation can still preview the approved public design.
   // The source fixtures are evaluated only on the server and never contain customer records here.
-  if (!process.env.DATABASE_URL) {
-    const [{ products }, { categories }, { seedBanners }, { vendors }] =
-      await Promise.all([
-        import("@/data/products"),
-        import("@/data/categories"),
-        import("@/data/promotions"),
-        import("@/data/vendors"),
-      ]);
-    const vendorNames = new Map(
-      vendors.map((vendor) => [vendor.id, vendor.name]),
-    );
-    state.products = products
-      .filter((p) => p.status === "published" && !p.restricted)
-      .map((product) =>
-        toPublicProduct({
-          ...product,
-          vendorName: vendorNames.get(product.vendorId),
-        }),
-      ) as unknown as Product[];
-    state.categories = categories.filter(isCustomerVisibleCategory);
-    state.banners = seedBanners;
-    return state;
-  }
+  if (!process.env.DATABASE_URL) return fixturePublicSnapshot();
   const db = database();
   const operations = admin && Boolean(user?.role);
   for (const kind of [

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { canAccessAdmin } from "@/lib/admin-access";
 import { useDemo } from "@/lib/store";
+import { CloseIcon, MenuIcon } from "@/components/icons";
 
 type NavItem = { href: string; label: string };
 type NavGroup = { label: string; items: NavItem[] };
@@ -167,7 +168,7 @@ export function AdminMobileNav() {
             {flatNav.find((item) => item.href === active)?.label || "Menu"}
           </strong>
         </span>
-        <b aria-hidden="true">☰</b>
+        <MenuIcon aria-hidden="true" />
       </button>
       <nav
         className={`admin-mobile-nav${open ? " open" : ""}`}
@@ -180,7 +181,7 @@ export function AdminMobileNav() {
             onClick={() => setOpen(false)}
             aria-label="Close operations menu"
           >
-            ×
+            <CloseIcon />
           </button>
         </header>
         {flatNav

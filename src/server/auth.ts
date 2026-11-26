@@ -4,6 +4,7 @@ import { expo } from "@better-auth/expo";
 import { database } from "./db";
 import { createHash } from "node:crypto";
 import { enqueueSystemMail } from "./mail/queue";
+import { processMailBatch } from "./mail/worker";
 import { trustedOrigins } from "./origins";
 
 export async function enqueueMail(
@@ -16,13 +17,30 @@ export async function enqueueMail(
   const digest = createHash("sha256")
     .update(url || body)
     .digest("hex");
-  await enqueueSystemMail({
-    eventKey: `auth:${isReset ? "reset" : "verify"}:${digest}`,
+  const eventKey = `auth:${isReset ? "reset" : "verify"}:${digest}`;
+  const queued = await enqueueSystemMail({
+    eventKey,
     eventType: isReset ? "auth.password_reset" : "auth.email_verification",
     recipient,
     template: isReset ? "auth.reset" : "auth.verify",
     data: { url },
   });
+  if (queued)
+    try {
+      const delivery = await processMailBatch(1, eventKey);
+      if (!delivery.sent)
+        console.warn("Auth email queued for retry after immediate delivery failed.", {
+          eventType: isReset
+            ? "auth.password_reset"
+            : "auth.email_verification",
+        });
+    } catch {
+      console.warn("Auth email queued; immediate mail transport unavailable.", {
+        eventType: isReset
+          ? "auth.password_reset"
+          : "auth.email_verification",
+      });
+    }
 }
 let instance: ReturnType<typeof betterAuth> | undefined;
 export function auth() {

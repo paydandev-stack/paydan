@@ -4,6 +4,7 @@ import { ArrowRightIcon } from "@/components/icons";
 import { StatusPill } from "@/components/status-pill";
 import { ToastDemo } from "@/components/demo/toast-demo";
 import type { Tone } from "@/lib/status";
+import { PasswordField } from "@/components/password-field";
 
 export const metadata = { title: "Design system" };
 
@@ -50,15 +51,15 @@ const typeSamples: { label: string; sample: string; style: CSSProperties }[] = [
     style: { font: "500 1.7rem var(--serif)", color: "var(--ink)" },
   },
   {
-    label: "Body · Manrope · .78rem",
+    label: "Body · Manrope · .9375rem",
     sample:
       "Supporting copy sits at a comfortable reading rhythm with muted colour.",
-    style: { fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.8 },
+    style: { fontSize: ".9375rem", color: "var(--muted)", lineHeight: 1.7 },
   },
   {
-    label: "Caption · Manrope · .62rem",
+    label: "Metadata · Manrope · .75rem minimum",
     sample: "Labels, metadata and table hints",
-    style: { fontSize: ".62rem", color: "var(--muted)" },
+    style: { fontSize: ".75rem", color: "var(--muted)" },
   },
   {
     label: "Kicker · Manrope 800 · letterspaced",
@@ -212,6 +213,12 @@ export default function DesignSystemPage() {
                   Number
                   <input type="number" defaultValue={2500} readOnly />
                 </label>
+                <PasswordField
+                  label="Password"
+                  defaultValue="example-password"
+                  autoComplete="current-password"
+                  readOnly
+                />
               </div>
             </div>
             <div className="ds-demo plain ds-stack">

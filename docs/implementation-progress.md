@@ -1,6 +1,6 @@
 # PAYDAN implementation status
 
-Updated 16 November 2026. This file records the delivered application behavior. Provider configuration and deployment procedures remain in `SETUP_AND_OPERATIONS.md` and `PRODUCTION_SERVICES.md`.
+Updated 26 November 2026. This file records the delivered application behavior. Provider configuration and deployment procedures remain in `SETUP_AND_OPERATIONS.md` and `PRODUCTION_SERVICES.md`.
 
 ## Delivered
 
@@ -18,6 +18,9 @@ Updated 16 November 2026. This file records the delivered application behavior. 
 | Buyer account       | Dashboard attention items, recently viewed, buy-again, saved finds, active orders, durable notification read state and append-only support conversations are connected to account-owned server data.                                                                                          |
 | Connected services  | Health states distinguish unconfigured, configured, verified, degraded and failing. Safe checks cover PostgreSQL, S3, SMTP, Paystack and CloudFront. Explicit acceptance timestamps prevent configuration alone from passing launch readiness.                                                |
 | Launch controls     | A Super Admin checklist covers content, inventory, support, policy approval, providers, workers and unresolved alerts. Robots and sitemap output are environment controlled; product sitemap entries remain price-free.                                                                       |
+| Ask PAYDAN          | Direct Groq fails over to OpenRouter Free only for safe pre-output transient failures, then to the deterministic assistant. Catalogue reads preserve guest/member privacy; add, remove, quantity-change and clear-cart actions use owner-bound, expiring confirmation proposals.            |
+| Auth and header UI  | Buyer/admin/vendor password fields share accessible show/hide controls; registration and reset require matching confirmation without transmitting it. Header account actions share an icon/label/badge structure with a Bell icon and a compact 901–1150px layout.                       |
+| UI foundations      | Shared spacing, text, control, icon, focus and motion rules tighten storefront and admin density. Admin tables and controls use readable interface sizing; auth and assistant controls retain mobile touch targets and reduced-motion support.                                               |
 
 ## Verification
 
@@ -34,7 +37,7 @@ The current automated suite exercises the real commerce migrations in PGlite, Be
 
 ## External acceptance still required
 
-`migrations/006_operational_completion.sql` must be applied once with the unpooled production Neon connection before deploying this build. The migration is forward-only and adds SKU enforcement, operational indexes, worker runs, notifications, support conversations and legacy order-line backfill.
+All unapplied migrations, including `006_operational_completion.sql` and `009_assistant_cart_actions.sql`, must be applied once with the unpooled production Neon connection before deploying this build. Migration 009 expands the proposal action constraint without changing existing proposal rows.
 
 The application does not mark provider setup as accepted merely because credentials exist. Complete the Google OAuth, S3/CloudFront, Paystack, transactional-email/webhook and Ask PAYDAN staging journeys, then set the corresponding `*_ACCEPTED_AT` ISO timestamps. Schedule mail every minute, payment reconciliation every five minutes and media cleanup daily.
 

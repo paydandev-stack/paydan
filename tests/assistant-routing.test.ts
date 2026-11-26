@@ -10,6 +10,8 @@ import {
 } from "../src/server/assistant/config";
 import { assistantModels } from "../src/server/assistant/providers";
 import { routeProviderStreams } from "../src/server/assistant/routing";
+import { products as seededProducts } from "../src/data/products";
+import { categories as seededCategories } from "../src/data/categories";
 
 function product(
   id: string,
@@ -74,6 +76,29 @@ function ids(query: string): string[] {
 }
 
 describe("Ask PAYDAN catalogue relevance", () => {
+  it("covers every visible department with at least one published demo product", () => {
+    const visible = seededCategories.filter(
+      (category) => category.active && !category.restricted,
+    );
+    for (const category of visible)
+      expect(
+        seededProducts.some(
+          (item) =>
+            item.categorySlug === category.slug &&
+            item.status === "published" &&
+            !item.restricted,
+        ),
+        `missing demo coverage for ${category.slug}`,
+      ).toBe(true);
+  });
+
+  it("finds seeded footwear in the real demo catalogue", () => {
+    expect(
+      searchRelevantProducts("show me shoes", seededProducts, 10).some(
+        (item) => item.categorySlug === "shoes-and-bags",
+      ),
+    ).toBe(true);
+  });
   it("matches real vehicles, not skincare or car-care accessories", () => {
     expect(ids("what of a car")).toEqual(["vehicle"]);
   });
@@ -102,42 +127,37 @@ describe("Ask PAYDAN catalogue relevance", () => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("AI production routing", () => {
-  it("uses a compound Gateway candidate followed by independent Groq", () => {
+  it("uses direct Groq followed by independent OpenRouter", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AI_PROVIDER_PROFILE", "production");
     vi.stubEnv("GROQ_API_KEY", "test-value-only");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-value-only");
     const models = assistantModels();
 
     expect(models.map(({ name }) => name)).toEqual([
-      "vercel-gateway",
       "groq-direct",
+      "openrouter-free",
     ]);
-    expect(models[0]?.modelId).toBe("reflection/beam-free");
-    expect(models[0]?.providerOptions).toEqual({
-      gateway: {
-        models: ["humansand/ampersand-v0.1"],
-        has: ["tool-use"],
-      },
-    });
-    expect(models[1]?.modelId).toBe("openai/gpt-oss-20b");
+    expect(models[0]?.modelId).toBe("openai/gpt-oss-20b");
+    expect(models[1]?.modelId).toBe("openrouter/free");
   });
 
-  it("does not require Groq to run the compound Gateway request", () => {
+  it("can run OpenRouter when Groq is not configured", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AI_PROVIDER_PROFILE", "production");
     vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-value-only");
     expect(assistantModels().map(({ name }) => name)).toEqual([
-      "vercel-gateway",
+      "openrouter-free",
     ]);
   });
 
-  it("uses the approved free model defaults and bounded timeout", () => {
+  it("uses the approved direct-provider defaults and bounded timeout", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AI_PROVIDER_PROFILE", "production");
     expect(assistantConfig()).toMatchObject({
-      primaryModel: "reflection/beam-free",
-      secondaryModel: "humansand/ampersand-v0.1",
       groqModel: "openai/gpt-oss-20b",
+      openRouterModel: "openrouter/free",
       timeoutMs: 12_000,
     });
   });
@@ -151,8 +171,13 @@ describe("AI production routing", () => {
     vi.stubEnv("AI_PROVIDER_TIMEOUT_MS", "999");
     expect(() => assistantConfig()).toThrow();
     vi.stubEnv("AI_PROVIDER_TIMEOUT_MS", "12000");
-    vi.stubEnv("AI_PRIMARY_MODEL", "not-a-provider-model");
+    vi.stubEnv("OPENROUTER_MODEL", "not-a-provider-model");
     expect(() => assistantConfig()).toThrow();
+  });
+
+  it("rejects retired Gateway variables", () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "retired-gateway-key");
+    expect(() => assistantConfig()).toThrow(/Gateway has been retired/i);
   });
 });
 
@@ -183,12 +208,12 @@ function runRoute({
 }) {
   const calls: string[] = [];
   const result = routeProviderStreams({
-    candidates: second ? ["gateway", "groq"] : ["gateway"],
+    candidates: second ? ["groq", "openrouter"] : ["groq"],
     abortSignal,
     attempt(candidate) {
       calls.push(candidate);
       return {
-        stream: parts(...(candidate === "gateway" ? first : second || [])),
+        stream: parts(...(candidate === "groq" ? first : second || [])),
       };
     },
     isMeaningful: (part) =>
@@ -218,10 +243,10 @@ describe("AI failover stream safety", () => {
     });
     await expect(result).resolves.toMatchObject({
       status: "success",
-      candidate: "gateway",
+      candidate: "groq",
       attempts: 1,
     });
-    expect(calls).toEqual(["gateway"]);
+    expect(calls).toEqual(["groq"]);
   });
 
   it.each([
@@ -229,17 +254,17 @@ describe("AI failover stream safety", () => {
     ["rate limit", providerError(429)],
     ["timeout", providerError(undefined, "request timed out")],
     ["network", providerError(undefined, "fetch failed")],
-  ])("falls back to Groq for a pre-output %s", async (_label, error) => {
+  ])("falls back to OpenRouter for a pre-output %s", async (_label, error) => {
     const { result, calls } = runRoute({
       first: [error],
       second: [{ type: "text-delta", value: "backup" }],
     });
     await expect(result).resolves.toMatchObject({
       status: "success",
-      candidate: "groq",
+      candidate: "openrouter",
       attempts: 2,
     });
-    expect(calls).toEqual(["gateway", "groq"]);
+    expect(calls).toEqual(["groq", "openrouter"]);
   });
 
   it.each([400, 401, 403, 404, 409, 422])(
@@ -251,10 +276,10 @@ describe("AI failover stream safety", () => {
       });
       await expect(result).resolves.toMatchObject({
         status: "terminal",
-        candidate: "gateway",
+        candidate: "groq",
         attempts: 1,
       });
-      expect(calls).toEqual(["gateway"]);
+      expect(calls).toEqual(["groq"]);
     },
   );
 
@@ -269,24 +294,24 @@ describe("AI failover stream safety", () => {
       });
       await expect(result).resolves.toMatchObject({
         status: "partial",
-        candidate: "gateway",
+        candidate: "groq",
         attempts: 1,
       });
-      expect(calls).toEqual(["gateway"]);
+      expect(calls).toEqual(["groq"]);
     },
   );
 
-  it("returns exhausted when Groq also fails transiently", async () => {
+  it("returns exhausted when OpenRouter also fails transiently", async () => {
     const { result, calls } = runRoute({
       first: [providerError(503)],
       second: [providerError(429)],
     });
     await expect(result).resolves.toMatchObject({
       status: "exhausted",
-      candidate: "groq",
+      candidate: "openrouter",
       attempts: 2,
     });
-    expect(calls).toEqual(["gateway", "groq"]);
+    expect(calls).toEqual(["groq", "openrouter"]);
   });
 
   it("stops on browser cancellation without trying another provider", async () => {
@@ -299,10 +324,10 @@ describe("AI failover stream safety", () => {
     });
     await expect(result).resolves.toMatchObject({
       status: "aborted",
-      candidate: "gateway",
+      candidate: "groq",
       attempts: 1,
     });
-    expect(calls).toEqual(["gateway"]);
+    expect(calls).toEqual(["groq"]);
   });
 
   it("classifies only the approved provider failures as transient", () => {

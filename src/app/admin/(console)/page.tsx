@@ -7,6 +7,7 @@ import { useDemo } from "@/lib/store";
 import { AdminKpis, AdminPageHeader } from "@/components/admin/page-header";
 import { AdminTable } from "@/components/admin/data-table";
 import { StatusPill } from "@/components/status-pill";
+import { ArrowRightIcon, CheckIcon, GridIcon, PlusIcon, StoreIcon } from "@/components/icons";
 import { formatDate, formatDateTime, money, plural } from "@/lib/format";
 import {
   fulfillmentStatusMeta,
@@ -131,7 +132,7 @@ export default function AdminDashboardPage() {
       <div className="admin-quick-actions">
         <Link className="admin-quick-action" href="/admin/products/new">
           <span className="admin-quick-action-icon" aria-hidden="true">
-            ＋
+            <PlusIcon />
           </span>
           <span>
             <strong>Add a product</strong>
@@ -140,7 +141,7 @@ export default function AdminDashboardPage() {
         </Link>
         <Link className="admin-quick-action" href="/admin/vendors/new">
           <span className="admin-quick-action-icon" aria-hidden="true">
-            ◇
+            <StoreIcon />
           </span>
           <span>
             <strong>Create vendor login</strong>
@@ -149,7 +150,7 @@ export default function AdminDashboardPage() {
         </Link>
         <Link className="admin-quick-action" href="/admin/orders">
           <span className="admin-quick-action-icon" aria-hidden="true">
-            ↗
+            <ArrowRightIcon />
           </span>
           <span>
             <strong>Review orders</strong>
@@ -161,7 +162,7 @@ export default function AdminDashboardPage() {
           href="/admin/inventory?attention=stock"
         >
           <span className="admin-quick-action-icon" aria-hidden="true">
-            ▦
+            <GridIcon />
           </span>
           <span>
             <strong>Review stock</strong>
@@ -170,7 +171,7 @@ export default function AdminDashboardPage() {
         </Link>
         <Link className="admin-quick-action" href="/admin/launch">
           <span className="admin-quick-action-icon" aria-hidden="true">
-            ✓
+            <CheckIcon />
           </span>
           <span>
             <strong>Run launch checks</strong>

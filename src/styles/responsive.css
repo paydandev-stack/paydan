@@ -1,6 +1,6 @@
 @media (max-width: 900px) {
   .wrap { width: min(100% - 2rem, 1340px); }
-  .utility, .actions span, .category-nav { display: none; }
+  .utility, .actions .header-action-label, .category-nav { display: none; }
   .header-main { min-height: 7.5rem; grid-template-columns: auto 1fr auto; gap: .8rem; padding-bottom: .75rem; }
   .location { display: none; }
   .mobile-menu { display: grid; place-items: center; border: 0; background: transparent; }
@@ -32,6 +32,24 @@
   .business { grid-template-columns: 1fr; gap: 2rem; }
   .footer-grid { grid-template-columns: 2fr 1fr 1fr; }
   .footer-grid > div:last-child { display: none; }
+}
+
+@media (min-width: 901px) and (max-width: 1150px) {
+  .wrap { width: min(100% - 1.5rem, 1340px); }
+  .header-main {
+    min-height: 5rem;
+    grid-template-columns: 5.6rem minmax(7rem, auto) minmax(12rem, 1fr) auto;
+    gap: .6rem;
+  }
+  .brand { width: 5.4rem; height: 3.4rem; }
+  .location { padding-inline: .5rem; }
+  .location strong { max-width: 8rem; overflow: hidden; text-overflow: ellipsis; }
+  .search { gap: .5rem; padding-left: .75rem; }
+  .search input { font-size: .8rem; }
+  .search button { padding-inline: .8rem; }
+  .actions { grid-auto-columns: minmax(3.2rem, 1fr); gap: .15rem; }
+  .actions a { font-size: .62rem; }
+  .nav-inner { gap: 1.2rem; }
 }
 
 @media (max-width: 600px) {

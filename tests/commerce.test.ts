@@ -39,6 +39,20 @@ vi.mock("../src/server/db", async (original) => {
       ),
   };
 });
+vi.mock("../src/server/mail/transport", async (original) => {
+  const actual = await original<
+    typeof import("../src/server/mail/transport")
+  >();
+  return {
+    ...actual,
+    mailTransport: () => ({
+      sendMail: async () => ({
+        messageId: "<verification-test@paydan.test>",
+        response: "queued verification-test-message",
+      }),
+    }),
+  };
+});
 import { database, put, record, records } from "../src/server/db";
 import { command } from "../src/server/commands";
 import { snapshot } from "../src/server/snapshot";
@@ -54,6 +68,7 @@ import { refundReturn, verifyRefund } from "../src/server/refunds";
 import { readMedia, beginUpload, finalizeUpload } from "../src/server/media";
 import { catalogCdnUrl, isCatalogCdnUrl } from "../src/server/media-delivery";
 import { chat, confirmAssistantProposal } from "../src/server/assistant";
+import { cancelCartProposal } from "../src/server/assistant/proposals";
 import { assistantConfig } from "../src/server/assistant/config";
 import { cloudFrontObjectUrl } from "../src/server/cloudfront";
 import { enqueueMail } from "../src/server/mail/queue";
@@ -162,6 +177,7 @@ beforeAll(async () => {
     "006_operational_completion.sql",
     "007_push_tokens.sql",
     "008_push_outbox.sql",
+    "009_assistant_cart_actions.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
@@ -732,9 +748,14 @@ describe("authentication and assistant", () => {
     const user = await viewer(new Headers({ cookie: cookies }));
     expect(user?.email).toBe("auth-test@example.com");
     expect(user?.role).toBeUndefined();
-    expect(
-      (await database().query("SELECT * FROM mail_outbox")).rows.length,
-    ).toBeGreaterThan(0);
+    const verificationMail = await database().query(
+      "SELECT event_type,sent_at,claimed_at,body FROM mail_outbox WHERE event_type=$1",
+      ["auth.email_verification"],
+    );
+    expect(verificationMail.rows).toHaveLength(1);
+    expect(verificationMail.rows[0].sent_at).toBeTruthy();
+    expect(verificationMail.rows[0].claimed_at).toBeNull();
+    expect(verificationMail.rows[0].body).toBe("");
   });
   it("keeps guest prompt injection attempts away from prices and supplier data", async () => {
     const result = await chat(null, {
@@ -773,6 +794,35 @@ describe("authentication and assistant", () => {
     await expect(
       confirmAssistantProposal(bob, { proposalId: id }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+  it("confirms quantity, removal and clear proposals and supports cancellation", async () => {
+    await command(alice, "addToCart", ["p1", "v1", 2], "proposal-seed");
+
+    const quantityId = crypto.randomUUID();
+    await database().query(
+      "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'set_cart_quantity',$3,now()+interval '15 minutes')",
+      [quantityId, alice.id, JSON.stringify({ productId: "p1", variantId: "v1", quantity: 4 })],
+    );
+    await confirmAssistantProposal(alice, { proposalId: quantityId });
+    expect((await snapshot(alice)).cart[0].quantity).toBe(4);
+
+    const cancelledId = crypto.randomUUID();
+    await database().query(
+      "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'remove_cart_line',$3,now()+interval '15 minutes')",
+      [cancelledId, alice.id, JSON.stringify({ productId: "p1", variantId: "v1" })],
+    );
+    await cancelCartProposal(alice, { proposalId: cancelledId });
+    await expect(
+      confirmAssistantProposal(alice, { proposalId: cancelledId }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    const clearId = crypto.randomUUID();
+    await database().query(
+      "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'clear_cart',$3,now()+interval '15 minutes')",
+      [clearId, alice.id, JSON.stringify({})],
+    );
+    await confirmAssistantProposal(alice, { proposalId: clearId });
+    expect((await snapshot(alice)).cart).toEqual([]);
   });
 });
 

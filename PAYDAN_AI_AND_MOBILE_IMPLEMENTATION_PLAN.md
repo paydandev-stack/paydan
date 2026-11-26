@@ -1,5 +1,7 @@
 # PAYDAN AI Concierge and Mobile UX Implementation Plan
 
+> Historical plan: its Vercel AI Gateway sections are superseded by `PAYDAN_UI_AI_CONSOLIDATED_IMPLEMENTATION_PLAN_AND_PROMPT.md`. The implemented route is direct Groq, then OpenRouter Free, then the deterministic assistant.
+
 ## 1. Outcome
 
 Build Ask PAYDAN as a controlled shopping concierge and improve the buyer-facing mobile experience without changing the desktop visual direction the client already approved.

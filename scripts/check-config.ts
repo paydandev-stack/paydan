@@ -26,8 +26,6 @@ const groups: Record<string, string[]> = {
   AI: [
     "AI_PROVIDER_PROFILE",
     "AI_PROVIDER_TIMEOUT_MS",
-    "AI_PRIMARY_MODEL",
-    "AI_SECONDARY_MODEL",
   ],
 };
 const optional: Record<string, string[]> = {
@@ -39,7 +37,14 @@ const optional: Record<string, string[]> = {
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
   ],
-  AI: ["AI_GATEWAY_API_KEY", "GROQ_API_KEY", "GROQ_MODEL"],
+  AI: [
+    "GROQ_API_KEY",
+    "GROQ_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_SITE_URL",
+    "OPENROUTER_APP_NAME",
+  ],
 };
 const legacyAiVariables = [
   "AI_GROQ_API_KEY",
@@ -47,6 +52,11 @@ const legacyAiVariables = [
   "AI_GROQ_BASE_URL",
   "AI_TEST_GROQ_ENABLED",
   "AI_TEST_GROQ_MODE",
+].filter((key) => process.env[key]?.trim());
+const retiredGatewayVariables = [
+  "AI_GATEWAY_API_KEY",
+  "AI_PRIMARY_MODEL",
+  "AI_SECONDARY_MODEL",
 ].filter((key) => process.env[key]?.trim());
 let missing = false;
 for (const [group, keys] of Object.entries(groups)) {
@@ -79,6 +89,12 @@ if (
 if (legacyAiVariables.length) {
   console.log(
     `AI: remove legacy variables and use GROQ_API_KEY/GROQ_MODEL: ${legacyAiVariables.join(", ")}.`,
+  );
+  missing = true;
+}
+if (retiredGatewayVariables.length) {
+  console.log(
+    `AI: Vercel AI Gateway is retired; remove ${retiredGatewayVariables.join(", ")}.`,
   );
   missing = true;
 }

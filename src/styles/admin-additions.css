@@ -1065,3 +1065,25 @@
     box-shadow: none;
   }
 }
+/* Readable operations density: 13–14px interface text and consistent controls. */
+.admin-sidebar a,
+.admin-sidebar button { min-height: 2.75rem; font-size: .8125rem; }
+.admin-sidebar small { font-size: .75rem; }
+.admin-content header p,
+.admin-card > p,
+.admin-meta div,
+.admin-note,
+.admin-notice { font-size: .8125rem; }
+.admin-btn { min-height: 2.75rem; font-size: .8125rem; }
+.admin-input,
+.admin-select,
+.admin-textarea { font-size: .875rem; }
+.admin-field { font-size: .8125rem; }
+.admin-field small { font-size: .75rem; }
+.admin-empty { border-style: solid; background: var(--surface); }
+.admin-empty p { font-size: .8125rem; }
+.admin-table { border: 1px solid var(--border); border-radius: .65rem; background: white; }
+.admin-table .table-head { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.admin-table .table-head,
+.admin-table .table-row { min-height: 3rem; align-items: center; font-size: .8125rem; }
+.admin-table .table-row:hover { background: #f8fbf8; }

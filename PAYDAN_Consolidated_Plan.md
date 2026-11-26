@@ -92,7 +92,7 @@ Answers use current published catalogue and approved knowledge. Product suggesti
 
 Ask whether a budget includes delivery. Offer alternatives or a sourcing request when appropriate. Do not invent products, stock, prices, delivery promises, or policy terms. Never collect card details or passwords through chat. AI outages fall back to normal search and support.
 
-Production AI sends one compound Vercel AI Gateway request: `reflection/beam-free`, with Gateway-native fallback to `humansand/ampersand-v0.1`. Direct Groq using `openai/gpt-oss-20b` is independent and runs only after an eligible transient pre-output Gateway failure. After both external services are unavailable, use the deterministic normal-search/support experience. Keep Gateway and Groq credentials server-only, never fail over after text/tool output, never replay mutations, and record only sanitized provider/model telemetry.
+Production AI calls direct Groq using `openai/gpt-oss-20b`, then OpenRouter Free only after an eligible transient pre-output failure. If both external services are unavailable, use the deterministic catalogue/search/support experience. Keep provider credentials server-only, never fail over after text/tool output, never replay mutations, and record only sanitized provider/model telemetry.
 
 ## 7. Remaining commerce and operations
 

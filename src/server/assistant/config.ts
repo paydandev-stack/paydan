@@ -28,6 +28,16 @@ export function assistantConfig() {
       `Remove legacy AI variables and use GROQ_API_KEY/GROQ_MODEL instead: ${legacyGroqVariables.join(", ")}.`,
     );
 
+  const gatewayVariables = [
+    "AI_GATEWAY_API_KEY",
+    "AI_PRIMARY_MODEL",
+    "AI_SECONDARY_MODEL",
+  ].filter((key) => process.env[key]?.trim());
+  if (gatewayVariables.length)
+    throw new Error(
+      `Vercel AI Gateway has been retired. Remove: ${gatewayVariables.join(", ")}.`,
+    );
+
   const profile = profileSchema.parse(
     process.env.AI_PROVIDER_PROFILE ||
       (process.env.NODE_ENV === "production" ? "production" : "test"),
@@ -37,15 +47,15 @@ export function assistantConfig() {
 
   return {
     profile,
-    primaryModel: modelSchema.parse(
-      process.env.AI_PRIMARY_MODEL || "reflection/beam-free",
-    ),
-    secondaryModel: modelSchema.parse(
-      process.env.AI_SECONDARY_MODEL || "humansand/ampersand-v0.1",
-    ),
     groqModel: modelSchema.parse(
       process.env.GROQ_MODEL || "openai/gpt-oss-20b",
     ),
+    openRouterModel: modelSchema.parse(
+      process.env.OPENROUTER_MODEL || "openrouter/free",
+    ),
+    openRouterSiteUrl:
+      process.env.OPENROUTER_SITE_URL?.trim() || "https://paydan.store",
+    openRouterAppName: process.env.OPENROUTER_APP_NAME?.trim() || "PAYDAN",
     timeoutMs: timeoutSchema.parse(
       process.env.AI_PROVIDER_TIMEOUT_MS || "12000",
     ),

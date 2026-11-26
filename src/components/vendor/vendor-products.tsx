@@ -6,6 +6,7 @@ import { api } from "@/lib/api-client";
 import { useDemo } from "@/lib/store";
 import type { VendorProduct } from "@/server/vendor";
 import { MediaUpload } from "@/components/media-upload";
+import { CloseIcon, PackageIcon, SearchIcon } from "@/components/icons";
 
 type Draft = {
   name: string;
@@ -166,7 +167,7 @@ export function VendorProducts({ products }: { products: VendorProduct[] }) {
           </p>
         </div>
         <label className="vendor-search">
-          <span aria-hidden="true">⌕</span>
+          <SearchIcon aria-hidden="true" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -184,7 +185,7 @@ export function VendorProducts({ products }: { products: VendorProduct[] }) {
                 {product.images[0] ? (
                   <img src={product.images[0]} alt={product.name} />
                 ) : (
-                  <span aria-hidden="true">◇</span>
+                  <PackageIcon aria-hidden="true" />
                 )}
                 <span className="vendor-status">{product.status}</span>
               </div>
@@ -236,7 +237,7 @@ export function VendorProducts({ products }: { products: VendorProduct[] }) {
                       }}
                       aria-label="Close editor"
                     >
-                      ×
+                      <CloseIcon />
                     </button>
                   </div>
                   <div className="vendor-fields">

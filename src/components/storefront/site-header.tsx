@@ -5,7 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useDemo } from "@/lib/store";
 import {
+  BellIcon,
   CartIcon,
+  CloseIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   GridIcon,
@@ -194,29 +196,52 @@ export function SiteHeader() {
 
           <nav className="actions" aria-label="Quick links">
             {state.customerSession ? (
-              <Link className="cart-link" href="/account/notifications">
-                <span>Updates</span>
-                {unreadCount > 0 ? (
-                  <b aria-label={`${unreadCount} unread updates`}>
-                    {unreadCount}
-                  </b>
-                ) : null}
+              <Link
+                className="header-action"
+                href="/account/notifications"
+                aria-current={pathname === "/account/notifications" ? "page" : undefined}
+              >
+                <span className="header-action-icon">
+                  <BellIcon />
+                  {unreadCount > 0 ? (
+                    <b aria-label={`${unreadCount} unread updates`}>
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </b>
+                  ) : null}
+                </span>
+                <span className="header-action-label">Updates</span>
               </Link>
             ) : null}
-            <Link href="/account/wishlist">
-              <HeartIcon />
-              <span>Wishlist</span>
+            <Link
+              className="header-action"
+              href="/account/wishlist"
+              aria-current={pathname === "/account/wishlist" ? "page" : undefined}
+            >
+              <span className="header-action-icon"><HeartIcon /></span>
+              <span className="header-action-label">Wishlist</span>
             </Link>
-            <Link href={accountHref}>
-              <UserIcon />
-              <span>{accountLabel}</span>
+            <Link
+              className="header-action"
+              href={accountHref}
+              aria-current={pathname === accountHref ? "page" : undefined}
+            >
+              <span className="header-action-icon"><UserIcon /></span>
+              <span className="header-action-label">{accountLabel}</span>
             </Link>
-            <Link className="cart-link" href="/cart">
-              <CartIcon />
-              <span>Cart</span>
-              {cartCount > 0 ? (
-                <b aria-label={`${cartCount} items in cart`}>{cartCount}</b>
-              ) : null}
+            <Link
+              className="header-action cart-link"
+              href="/cart"
+              aria-current={pathname === "/cart" ? "page" : undefined}
+            >
+              <span className="header-action-icon">
+                <CartIcon />
+                {cartCount > 0 ? (
+                  <b aria-label={`${cartCount} items in cart`}>
+                    {cartCount > 99 ? "99+" : cartCount}
+                  </b>
+                ) : null}
+              </span>
+              <span className="header-action-label">Cart</span>
             </Link>
           </nav>
         </div>
@@ -230,7 +255,7 @@ export function SiteHeader() {
             <div className="mobile-drawer-head">
               <strong>Browse PAYDAN</strong>
               <button type="button" onClick={closeAll} aria-label="Close menu">
-                ×
+                <CloseIcon />
               </button>
             </div>
             <button

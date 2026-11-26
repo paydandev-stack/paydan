@@ -9,7 +9,7 @@ Target delivery for a production-ready first release is approximately 6–10 wee
 ## 2. Non-negotiable boundaries
 
 - Do not port `/admin` or staff operations to mobile.
-- Keep Neon, S3/CloudFront, Paystack, Resend/SMTP, Vercel AI Gateway, Groq and all signing credentials on the Next.js server.
+- Keep Neon, S3/CloudFront, Paystack, Resend/SMTP, direct Groq/OpenRouter and all signing credentials on the Next.js server.
 - Never put a database URL, provider secret, S3 credential, Paystack secret or AI key in Expo variables or the app bundle.
 - Treat the mobile app as an untrusted API client. Revalidate authentication, ownership, prices, inventory, totals, delivery and permissions on the server.
 - Preserve the approved desktop/web experience. Mobile API work must not break browser sessions or web routes.

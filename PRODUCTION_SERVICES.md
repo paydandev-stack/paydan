@@ -18,7 +18,7 @@ Keep `S3_ENDPOINT` unset in production. It is only used for the local MinIO fall
 
 ## Transactional email
 
-Resend can send from `orders@updates.paydan.store` when `updates.paydan.store` is the verified sending domain. Set `MAIL_FROM`, `MAIL_REPLY_TO`, `OPERATIONS_NOTIFICATION_EMAIL`, SMTP credentials, `CRON_SECRET`, and `RESEND_WEBHOOK_SECRET`.
+Resend can send from `orders@updates.paydan.store` when `updates.paydan.store` is the verified sending domain. Set `MAIL_FROM`, `MAIL_REPLY_TO`, `OPERATIONS_NOTIFICATION_EMAIL`, SMTP credentials, `CRON_SECRET`, and `RESEND_WEBHOOK_SECRET`. Authentication messages attempt immediate SMTP delivery after being stored in the outbox; the scheduled mail worker remains the durable retry path.
 
 Configure the Resend webhook URL as `/api/webhooks/resend`. Subscribe to delivered, delayed, bounced, and complained events. Vercel invokes `/api/cron/mail` and supplies `Authorization: Bearer $CRON_SECRET`.
 
@@ -32,14 +32,14 @@ After observing each complete staging journey, record its ISO timestamp in `GOOG
 
 Production uses this bounded route:
 
-1. One Vercel AI Gateway request using `AI_PRIMARY_MODEL=reflection/beam-free` with native fallback to `AI_SECONDARY_MODEL=humansand/ampersand-v0.1`.
-2. Direct Groq using `GROQ_MODEL=openai/gpt-oss-20b` only when the entire Gateway request fails before output with a timeout, network error, `408`, `429`, or provider `5xx`.
+1. Direct Groq using `GROQ_MODEL=openai/gpt-oss-20b`.
+2. OpenRouter using `OPENROUTER_MODEL=openrouter/free` only when Groq fails before output with a timeout, network error, `408`, `429`, or provider `5xx`.
 3. The deterministic PAYDAN catalogue/search/support assistant when external providers remain unavailable or are misconfigured.
 
-Set `AI_PROVIDER_TIMEOUT_MS=12000`. Vercel OIDC can authenticate Gateway on Vercel; `AI_GATEWAY_API_KEY` is useful outside Vercel. `GROQ_API_KEY` is independent from Gateway and must be stored only in Vercel project secrets or a gitignored local environment file.
+Set `AI_PROVIDER_TIMEOUT_MS=12000`. Store `GROQ_API_KEY` and `OPENROUTER_API_KEY` only in Vercel project secrets or a gitignored local environment file. `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME` identify PAYDAN to OpenRouter. The application rejects the retired Gateway variables so an old deployment cannot silently use the wrong route.
 
 PAYDAN does not fail over after text, a tool call, or a tool result has reached the client, preventing duplicate cart proposals and mixed-provider replies. It also does not fail over on invalid requests, authorization/authentication failures, malformed tools, or browser cancellation. Logs contain provider/model, latency, token usage, status and a sanitized failure class—not prompts, provider response bodies, secrets or customer PII.
 
 The earlier Groq key was exposed during local inspection. Revoke it before production use, generate a new key, and save the replacement only in the Vercel environment dashboard and a gitignored local file. Do not add `AI_GROQ_*` or `AI_TEST_GROQ_*`; those legacy names are rejected.
 
-The assistant never writes the cart directly. It stores a short-lived proposal that the signed-in user must explicitly confirm.
+The assistant never writes the cart directly. Add, remove, quantity-change and clear-cart requests create short-lived, owner-bound proposals that the signed-in user must explicitly confirm or cancel.

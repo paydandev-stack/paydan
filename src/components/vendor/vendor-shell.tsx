@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useDemo } from "@/lib/store";
+import { HomeIcon, PackageIcon, StoreIcon } from "@/components/icons";
 
 type Props = {
   active: "overview" | "products" | "orders";
@@ -11,14 +12,14 @@ type Props = {
 };
 
 const links = [
-  { href: "/vendor", key: "overview", label: "Overview", icon: "◇" },
+  { href: "/vendor", key: "overview", label: "Overview", icon: HomeIcon },
   {
     href: "/vendor/products",
     key: "products",
     label: "My catalogue",
-    icon: "▦",
+    icon: StoreIcon,
   },
-  { href: "/vendor/orders", key: "orders", label: "Order queue", icon: "≡" },
+  { href: "/vendor/orders", key: "orders", label: "Order queue", icon: PackageIcon },
 ] as const;
 
 export function VendorShell({ active, vendorName, email, children }: Props) {
@@ -36,17 +37,20 @@ export function VendorShell({ active, vendorName, email, children }: Props) {
 
         <nav className="vendor-nav" aria-label="Vendor portal">
           <small>WORKSPACE</small>
-          {links.map((link) => (
-            <Link
-              key={link.key}
-              href={link.href}
-              className={active === link.key ? "active" : undefined}
-              aria-current={active === link.key ? "page" : undefined}
-            >
-              <span aria-hidden="true">{link.icon}</span>
-              {link.label}
-            </Link>
-          ))}
+          {links.map((link) => {
+            const Icon = link.icon;
+            return (
+              <Link
+                key={link.key}
+                href={link.href}
+                className={active === link.key ? "active" : undefined}
+                aria-current={active === link.key ? "page" : undefined}
+              >
+                <Icon aria-hidden="true" />
+                {link.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="vendor-sidebar-foot">

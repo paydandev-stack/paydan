@@ -667,6 +667,34 @@ export const products: Product[] = [
     specifications: { Contents: "6 items" },
   }),
 
+  // Village Market
+  p({
+    id: "p-46",
+    name: "Fresh Market Produce Basket",
+    categorySlug: "village-market",
+    brand: "Village Market",
+    price: 19800,
+    vendorId: "v-6",
+    image: "groceries",
+    availability: "supplier_confirm",
+    blurb: "A seasonal basket of tomatoes, peppers, onions, greens and fruit sourced from local traders.",
+    specifications: { Contents: "Seasonal mixed produce", Source: "Local market traders" },
+  }),
+
+  // Fuel & Energy
+  p({
+    id: "p-47",
+    name: "Rechargeable Emergency Power Station",
+    categorySlug: "fuel-and-energy",
+    brand: "PowerLink",
+    price: 145000,
+    vendorId: "v-4",
+    image: "car",
+    availability: "supplier_confirm",
+    blurb: "Portable backup power for phones, routers and small household devices.",
+    specifications: { Capacity: "500Wh", Outputs: "AC, USB-A and USB-C" },
+  }),
+
   // Restricted / unpublished — admin preview only
   p({
     id: "p-43",

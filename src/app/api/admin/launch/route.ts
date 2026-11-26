@@ -198,7 +198,7 @@ export async function GET(request: Request) {
         key: "ai",
         label: "AI provider route configured",
         ok: Boolean(
-          (process.env.AI_PRIMARY_MODEL || process.env.GROQ_API_KEY) &&
+          (process.env.GROQ_API_KEY || process.env.OPENROUTER_API_KEY) &&
           process.env.AI_ACCEPTED_AT,
         ),
         detail:

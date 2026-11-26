@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
-import { SlidersIcon } from "@/components/icons";
+import { CloseIcon, SlidersIcon } from "@/components/icons";
 import { plural } from "@/lib/format";
 import { toViewerProducts } from "@/lib/catalog-dto";
 import { availabilityMeta } from "@/lib/status";
@@ -411,7 +411,7 @@ export function CatalogView({
               onClick={() => setFiltersOpen(false)}
               aria-label="Close filters"
             >
-              ×
+              <CloseIcon />
             </button>
           </div>
           <SlidersIcon />

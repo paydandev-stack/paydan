@@ -1,6 +1,14 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useDemo } from "@/lib/store";
 import { api } from "@/lib/api-client";
 import { rememberIntent } from "@/lib/intent";
@@ -13,6 +21,15 @@ import {
   SparkleIcon,
 } from "@/components/icons";
 import { money } from "@/lib/format";
+import {
+  clampLauncherPosition,
+  type LauncherPosition,
+} from "@/lib/launcher-position";
+type CartProposalAction =
+  | "add_to_cart"
+  | "remove_cart_line"
+  | "set_cart_quantity"
+  | "clear_cart";
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -21,14 +38,16 @@ type Message = {
   links?: { label: string; href: string }[];
   cartProposal?: {
     proposalId: string;
-    productId: string;
-    variantId?: string;
-    quantity: number;
+    action: CartProposalAction;
+    summary: Record<string, unknown>;
   };
-  confirmed?: boolean;
+  proposalStatus?: "pending" | "confirming" | "confirmed" | "cancelled" | "failed";
   error?: boolean;
 };
-const key = "paydan-chat-v2";
+// Proposal payloads changed in v3 (remove, quantity and clear actions). Do not
+// revive incompatible add-only proposal state from an older browser session.
+const key = "paydan-chat-v3";
+const launcherPositionKey = "paydan-assistant-launcher-position-v1";
 export function AskPaydan() {
   const { state, hydrated, refresh } = useDemo();
   const owner = state.customerSession?.id ?? "guest";
@@ -42,11 +61,24 @@ export function AskPaydan() {
   const [expanded, setExpanded] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [launcherPosition, setLauncherPosition] =
+    useState<LauncherPosition | null>(null);
+  const [draggingLauncher, setDraggingLauncher] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLElement>(null);
   const launcher = useRef<HTMLButtonElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const currentOwner = useRef(owner);
+  const launcherPositionRef = useRef<LauncherPosition | null>(null);
+  const launcherDrag = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressLauncherClick = useRef(false);
   currentOwner.current = owner;
   const messages = thread.owner === owner ? thread.messages : [];
   useEffect(() => {
@@ -65,6 +97,35 @@ export function AskPaydan() {
     }
     setLoaded(true);
   }, [hydrated, owner]);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(launcherPositionKey) || "null",
+      ) as Partial<LauncherPosition> | null;
+      if (Number.isFinite(saved?.left) && Number.isFinite(saved?.top)) {
+        const position = { left: Number(saved?.left), top: Number(saved?.top) };
+        launcherPositionRef.current = position;
+        setLauncherPosition(position);
+      }
+    } catch {}
+    const keepInView = () => {
+      const element = launcher.current;
+      const position = launcherPositionRef.current;
+      if (!element || !position) return;
+      const bounded = clampLauncherPosition(
+        position,
+        element.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      launcherPositionRef.current = bounded;
+      setLauncherPosition(bounded);
+      try {
+        localStorage.setItem(launcherPositionKey, JSON.stringify(bounded));
+      } catch {}
+    };
+    window.addEventListener("resize", keepInView);
+    return () => window.removeEventListener("resize", keepInView);
+  }, []);
   useEffect(() => {
     if (loaded && thread.owner === owner)
       try {
@@ -211,9 +272,8 @@ export function AskPaydan() {
             if (data.kind === "cart-proposal")
               reply.cartProposal = {
                 proposalId: String(data.proposalId),
-                productId: String(data.productId),
-                variantId: String(data.variantId),
-                quantity: Number(data.quantity),
+                action: data.action as CartProposalAction,
+                summary: (data.summary || {}) as Record<string, unknown>,
               };
             if (Array.isArray(data.links))
               reply.links = data.links as Message["links"];
@@ -253,19 +313,19 @@ export function AskPaydan() {
   async function confirm(message: Message) {
     const proposal = message.cartProposal;
     if (!proposal || busy) return;
-    if (!proposal.variantId) return;
     if (!state.customerSession) {
-      rememberIntent({
-        productId: proposal.productId,
-        variantId: proposal.variantId,
-        quantity: proposal.quantity,
-        path: "/cart",
-      });
+      rememberIntent({ path: "/cart" });
       location.assign("/login");
       return;
     }
     const requestOwner = owner;
     setBusy(true);
+    setThread((t) => ({
+      ...t,
+      messages: t.messages.map((m) =>
+        m.id === message.id ? { ...m, proposalStatus: "confirming" } : m,
+      ),
+    }));
     try {
       await api("/api/assistant/proposals/confirm", {
         proposalId: proposal.proposalId,
@@ -278,8 +338,8 @@ export function AskPaydan() {
             m.id === message.id
               ? {
                   ...m,
-                  confirmed: true,
-                  text: `Added ${proposal.quantity} item${proposal.quantity === 1 ? "" : "s"} to your cart. Review your cart before checkout.`,
+                  proposalStatus: "confirmed",
+                  text: "Cart change confirmed. Review your cart before checkout.",
                 }
               : m,
           ),
@@ -288,19 +348,53 @@ export function AskPaydan() {
       if (currentOwner.current === requestOwner)
         setThread((t) => ({
           ...t,
-          messages: [
-            ...t.messages,
-            {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              text:
-                error instanceof Error
-                  ? error.message
-                  : "The cart could not be updated.",
-              error: true,
-            },
-          ],
+          messages: t.messages.map((m) =>
+            m.id === message.id
+              ? {
+                  ...m,
+                  proposalStatus: "failed",
+                  text:
+                    error instanceof Error
+                      ? error.message
+                      : "The cart could not be updated.",
+                  error: true,
+                }
+              : m,
+          ),
         }));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancelProposal(message: Message) {
+    if (!message.cartProposal || busy) return;
+    setBusy(true);
+    try {
+      await api("/api/assistant/proposals/cancel", {
+        proposalId: message.cartProposal.proposalId,
+      });
+      setThread((t) => ({
+        ...t,
+        messages: t.messages.map((m) =>
+          m.id === message.id
+            ? { ...m, proposalStatus: "cancelled", text: "Cart change cancelled." }
+            : m,
+        ),
+      }));
+    } catch (error) {
+      setThread((t) => ({
+        ...t,
+        messages: t.messages.map((m) =>
+          m.id === message.id
+            ? {
+                ...m,
+                proposalStatus: "failed",
+                text: error instanceof Error ? error.message : "The proposal could not be cancelled.",
+                error: true,
+              }
+            : m,
+        ),
+      }));
     } finally {
       setBusy(false);
     }
@@ -309,6 +403,102 @@ export function AskPaydan() {
     event.preventDefault();
     void send(draft);
   }
+  function moveLauncher(position: LauncherPosition, persist = false) {
+    const element = launcher.current;
+    if (!element) return;
+    const bounded = clampLauncherPosition(
+      position,
+      element.getBoundingClientRect(),
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    launcherPositionRef.current = bounded;
+    setLauncherPosition(bounded);
+    if (persist)
+      try {
+        localStorage.setItem(launcherPositionKey, JSON.stringify(bounded));
+      } catch {}
+  }
+  function beginLauncherDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || mobile) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    launcherDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function dragLauncher(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = launcherDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (
+      !drag.moved &&
+      Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6
+    )
+      return;
+    event.preventDefault();
+    drag.moved = true;
+    suppressLauncherClick.current = true;
+    setDraggingLauncher(true);
+    moveLauncher({
+      left: event.clientX - drag.offsetX,
+      top: event.clientY - drag.offsetY,
+    });
+  }
+  function endLauncherDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const drag = launcherDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag.moved && launcherPositionRef.current)
+      moveLauncher(launcherPositionRef.current, true);
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    launcherDrag.current = null;
+    setDraggingLauncher(false);
+  }
+  function moveLauncherWithKeyboard(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ) {
+    if (!event.altKey || !event.key.startsWith("Arrow") || mobile) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const current = launcherPositionRef.current || {
+      left: rect.left,
+      top: rect.top,
+    };
+    const amount = event.shiftKey ? 32 : 12;
+    moveLauncher(
+      {
+        left:
+          current.left +
+          (event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0),
+        top:
+          current.top +
+          (event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0),
+      },
+      true,
+    );
+  }
+  function openFromLauncher(event: React.MouseEvent<HTMLButtonElement>) {
+    if (suppressLauncherClick.current) {
+      event.preventDefault();
+      suppressLauncherClick.current = false;
+      return;
+    }
+    setView("open");
+  }
+  const launcherStyle: CSSProperties | undefined = launcherPosition
+    ? {
+        left: launcherPosition.left,
+        top: launcherPosition.top,
+        right: "auto",
+        bottom: "auto",
+      }
+    : undefined;
+  const launcherClass = (base: string) =>
+    `${base}${draggingLauncher ? " is-dragging" : ""}`;
   const count = state.cart.reduce((n, l) => n + l.quantity, 0);
   const total = state.cart.reduce(
     (n, l) =>
@@ -323,10 +513,18 @@ export function AskPaydan() {
     return (
       <button
         ref={launcher}
-        className="ask-launcher"
+        className={launcherClass("ask-launcher")}
+        style={launcherStyle}
         aria-haspopup="dialog"
         aria-expanded={false}
-        onClick={() => setView("open")}
+        aria-label="Ask PAYDAN. Drag to move, press Enter to open, or use Alt plus an arrow key to reposition."
+        title="Drag to move Ask PAYDAN"
+        onPointerDown={beginLauncherDrag}
+        onPointerMove={dragLauncher}
+        onPointerUp={endLauncherDrag}
+        onPointerCancel={endLauncherDrag}
+        onKeyDown={moveLauncherWithKeyboard}
+        onClick={openFromLauncher}
       >
         <SparkleIcon />
         Ask PAYDAN
@@ -336,9 +534,16 @@ export function AskPaydan() {
     return (
       <button
         ref={launcher}
-        className="ask-peek"
-        aria-label="Restore Ask PAYDAN"
-        onClick={() => setView("open")}
+        className={launcherClass("ask-peek")}
+        style={launcherStyle}
+        aria-label="Restore Ask PAYDAN. Drag to move or use Alt plus an arrow key to reposition."
+        title="Drag to move Ask PAYDAN"
+        onPointerDown={beginLauncherDrag}
+        onPointerMove={dragLauncher}
+        onPointerUp={endLauncherDrag}
+        onPointerCancel={endLauncherDrag}
+        onKeyDown={moveLauncherWithKeyboard}
+        onClick={openFromLauncher}
       >
         <SparkleIcon />
         <span>
@@ -433,9 +638,16 @@ export function AskPaydan() {
           </>
         )}
         {messages.map((message) => {
-          const product = state.products.find(
-            (p) => p.id === message.cartProposal?.productId,
-          );
+          const proposal = message.cartProposal;
+          const summary = proposal?.summary || {};
+          const proposalTitle = proposal
+            ? {
+                add_to_cart: "Add to cart",
+                remove_cart_line: "Remove cart item",
+                set_cart_quantity: "Change cart quantity",
+                clear_cart: "Clear cart",
+              }[proposal.action]
+            : "";
           return (
             <div
               key={message.id}
@@ -454,39 +666,55 @@ export function AskPaydan() {
                   ))}
                 </div>
               )}
-              {product && message.cartProposal && !message.confirmed && (
+              {proposal && (
                 <div className="ask-confirm">
-                  <strong>
-                    {product.name} × {message.cartProposal.quantity}
-                  </strong>
-                  <label>
-                    Choose your option
-                    <select
-                      aria-label="Product variant"
-                      value={message.cartProposal.variantId || ""}
-                      disabled
-                    >
-                      <option value="">Select an option</option>
-                      {product.variants.map((v) => (
-                        <option
-                          disabled={v.availability === "out_of_stock"}
-                          key={v.id}
-                          value={v.id}
-                        >
-                          {v.label}
-                          {state.customerSession ? ` · ${money(v.price)}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    disabled={busy || !message.cartProposal.variantId}
-                    onClick={() => void confirm(message)}
-                  >
-                    {state.customerSession
-                      ? "Confirm add to cart"
-                      : "Sign in to add this selection"}
-                  </button>
+                  <span className="ask-confirm-label">Requires confirmation</span>
+                  <strong>{proposalTitle}</strong>
+                  {typeof summary.productName === "string" ? (
+                    <span>{summary.productName}</span>
+                  ) : null}
+                  {typeof summary.variantLabel === "string" && summary.variantLabel ? (
+                    <small>{summary.variantLabel}</small>
+                  ) : null}
+                  {proposal.action === "add_to_cart" ? (
+                    <small>Quantity: {String(summary.quantity || 1)}</small>
+                  ) : null}
+                  {proposal.action === "set_cart_quantity" ? (
+                    <small>
+                      Quantity: {String(summary.oldQuantity)} → {String(summary.newQuantity)}
+                    </small>
+                  ) : null}
+                  {proposal.action === "clear_cart" ? (
+                    <small>
+                      {String(summary.lineCount || 0)} cart lines · {String(summary.itemCount || 0)} items
+                    </small>
+                  ) : null}
+                  {message.proposalStatus === "confirmed" ||
+                  message.proposalStatus === "cancelled" ? (
+                    <span className={`ask-proposal-state ${message.proposalStatus}`}>
+                      {message.proposalStatus === "confirmed" ? "Confirmed" : "Cancelled"}
+                    </span>
+                  ) : (
+                    <div className="ask-confirm-actions">
+                      <button
+                        disabled={busy || message.proposalStatus === "confirming"}
+                        onClick={() => void confirm(message)}
+                      >
+                        {message.proposalStatus === "confirming"
+                          ? "Confirming…"
+                          : state.customerSession
+                            ? "Confirm change"
+                            : "Sign in to continue"}
+                      </button>
+                      <button
+                        className="quiet"
+                        disabled={busy || message.proposalStatus === "confirming"}
+                        onClick={() => void cancelProposal(message)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {message.links && (

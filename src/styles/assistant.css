@@ -10,6 +10,14 @@
   bottom: 1rem;
   border: 0;
   box-shadow: var(--shadow-overlay);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.ask-launcher.is-dragging,
+.ask-peek.is-dragging {
+  cursor: grabbing;
 }
 
 .ask-launcher {

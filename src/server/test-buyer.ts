@@ -17,7 +17,7 @@ import { put, record, transaction } from "./db";
 
 type Identity = { id: string; name: string; email: string };
 
-const TEST_DATA_VERSION = 2;
+const TEST_DATA_VERSION = 3;
 const TEST_KINDS = [
   "testProducts",
   "testVendors",

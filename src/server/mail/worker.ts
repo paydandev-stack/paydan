@@ -16,18 +16,19 @@ type ClaimedMail = {
   claim_token: string;
 };
 
-async function claim(limit: number): Promise<ClaimedMail[]> {
+async function claim(limit: number, eventKey?: string): Promise<ClaimedMail[]> {
   const token = randomUUID();
   const result = await database().query(
     `WITH due AS (
       SELECT id FROM mail_outbox
       WHERE sent_at IS NULL AND dead_at IS NULL AND attempts < 8 AND next_attempt <= now()
         AND (claimed_at IS NULL OR claimed_at < now() - interval '10 minutes')
+        AND ($3::text IS NULL OR event_key=$3)
       ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1
     )
     UPDATE mail_outbox m SET claimed_at=now(),claim_token=$2 FROM due
     WHERE m.id=due.id RETURNING m.*`,
-    [Math.max(1, Math.min(limit, 50)), token],
+    [Math.max(1, Math.min(limit, 50)), token, eventKey ?? null],
   );
   return result.rows;
 }
@@ -58,10 +59,19 @@ export async function retryDeadMail(limit = 25, onlyId?: string) {
   return result.rows.length;
 }
 
-export async function processMailBatch(limit = 25) {
-  const mails = await claim(limit);
+export async function processMailBatch(limit = 25, eventKey?: string) {
+  const mails = await claim(limit, eventKey);
   if (!mails.length) return { claimed: 0, sent: 0, failed: 0, suppressed: 0 };
-  const transport = mailTransport();
+  let transport;
+  try {
+    transport = mailTransport();
+  } catch (error) {
+    await database().query(
+      "UPDATE mail_outbox SET claimed_at=NULL,claim_token=NULL,last_error='Mail transport unavailable' WHERE claim_token=$1",
+      [mails[0].claim_token],
+    );
+    throw error;
+  }
   let sent = 0,
     failed = 0,
     suppressed = 0;

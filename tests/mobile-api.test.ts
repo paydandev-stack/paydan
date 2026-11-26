@@ -193,6 +193,7 @@ beforeAll(async () => {
     "006_operational_completion.sql",
     "007_push_tokens.sql",
     "008_push_outbox.sql",
+    "009_assistant_cart_actions.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);

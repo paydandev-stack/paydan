@@ -99,6 +99,26 @@
   background: #fff;
   width: 100%;
 }
+.password-field { margin-block: 1rem; }
+.password-control { position: relative; display: block; }
+.password-control input { padding-right: 3.25rem; }
+.password-visibility {
+  position: absolute;
+  top: 50%;
+  right: .3rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: .35rem;
+  background: transparent;
+  color: var(--muted);
+}
+.password-visibility:hover { background: var(--green-soft); color: var(--green-deep); }
+.password-visibility svg { width: 1.15rem; }
+.field-error { color: #a23c31 !important; }
 .auth-form-panel .primary,
 .google-button {
   width: 100%;
@@ -325,6 +345,21 @@
   color: white;
   border-radius: 0.3rem;
 }
+.ask-confirm-label {
+  width: fit-content;
+  padding: .2rem .45rem;
+  border-radius: 2rem;
+  background: var(--orange-soft);
+  color: #704817;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.ask-confirm small { color: var(--muted); font-size: .75rem; }
+.ask-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.ask-confirm-actions button.quiet { border: 1px solid var(--border); background: white; color: var(--ink); }
+.ask-proposal-state { font-size: .75rem; font-weight: 800; }
+.ask-proposal-state.confirmed { color: var(--green); }
+.ask-proposal-state.cancelled { color: var(--muted); }
 @media (max-width: 700px) {
   .auth-experience {
     display: block;

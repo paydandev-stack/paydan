@@ -1,13 +1,26 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
-import { tool } from "ai";
 import { z } from "zod";
 import type { Product } from "@/lib/types";
 import { normalizeProductQuery, searchRelevantProducts } from "@/lib/assistant";
 import { database } from "../db";
 import type { Viewer } from "../http";
 import { snapshot } from "../snapshot";
+import { cartProposalInput, createCartProposal } from "./proposals";
+
+export type AssistantToolDefinition = {
+  description: string;
+  inputSchema: z.ZodType;
+  execute: (input: never) => unknown | Promise<unknown>;
+};
+
+function assistantTool<TSchema extends z.ZodType>(definition: {
+  description: string;
+  inputSchema: TSchema;
+  execute: (input: z.infer<TSchema>) => unknown | Promise<unknown>;
+}) {
+  return definition;
+}
 
 function productResult(product: Product, signedIn: boolean) {
   return {
@@ -79,7 +92,7 @@ export async function assistantTools(user: Viewer | null) {
     (product) => product.status === "published" && !product.restricted,
   );
   return {
-    searchCatalog: tool({
+    searchCatalog: assistantTool({
       description:
         "Search PAYDAN's published catalog. Use this before recommending or claiming that an item exists.",
       inputSchema: z.object({
@@ -99,7 +112,7 @@ export async function assistantTools(user: Viewer | null) {
         };
       },
     }),
-    getProductDetails: tool({
+    getProductDetails: assistantTool({
       description: "Load current details for a known catalog product ID.",
       inputSchema: z.object({ productId: z.string().max(160) }),
       execute: async ({ productId }) => {
@@ -112,7 +125,7 @@ export async function assistantTools(user: Viewer | null) {
           : { kind: "not-found" as const };
       },
     }),
-    compareProducts: tool({
+    compareProducts: assistantTool({
       description:
         "Compare two to four known PAYDAN product IDs using catalog facts only.",
       inputSchema: z.object({
@@ -125,7 +138,7 @@ export async function assistantTools(user: Viewer | null) {
           .map((product) => productResult(product, signedIn)),
       }),
     }),
-    getCurrentCart: tool({
+    getCurrentCart: assistantTool({
       description:
         "Read the signed-in shopper's current cart. Never use for guests.",
       inputSchema: z.object({}),
@@ -150,42 +163,20 @@ export async function assistantTools(user: Viewer | null) {
             }
           : { kind: "auth-required" as const, href: "/login?next=%2Fcart" },
     }),
-    proposeCartChange: tool({
+    proposeCartChange: assistantTool({
       description:
-        "Create a short-lived add-to-cart proposal for explicit user confirmation. This never changes the cart.",
-      inputSchema: z.object({
-        productId: z.string().max(160),
-        variantId: z.string().max(160),
-        quantity: z.number().int().min(1).max(20),
-      }),
-      execute: async ({ productId, variantId, quantity }) => {
+        "Create a short-lived add, remove, quantity-change, or clear-cart proposal for explicit user confirmation. Read the cart first for remove/change requests. This never changes the cart.",
+      inputSchema: cartProposalInput,
+      execute: async (input) => {
         if (!user)
           return {
             kind: "auth-required" as const,
             href: "/login?next=%2Fcart",
           };
-        const product = published.find((item) => item.id === productId);
-        const variant = product?.variants.find(
-          (item) =>
-            item.id === variantId && item.availability !== "out_of_stock",
-        );
-        if (!product || !variant) return { kind: "not-found" as const };
-        const id = randomUUID();
-        await database().query(
-          "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'add_to_cart',$3,now()+interval '15 minutes')",
-          [id, user.id, JSON.stringify({ productId, variantId, quantity })],
-        );
-        return {
-          kind: "cart-proposal" as const,
-          proposalId: id,
-          productId,
-          variantId,
-          quantity,
-          expiresInSeconds: 900,
-        };
+        return createCartProposal(user, input);
       },
     }),
-    getOwnOrders: tool({
+    getOwnOrders: assistantTool({
       description:
         "Read only the signed-in shopper's own recent orders and statuses.",
       inputSchema: z.object({
@@ -208,7 +199,7 @@ export async function assistantTools(user: Viewer | null) {
               href: "/login?next=%2Faccount%2Forders",
             },
     }),
-    getShippingOptions: tool({
+    getShippingOptions: assistantTool({
       description:
         "Explain configured shipping availability. Fees are account-only and checkout remains authoritative.",
       inputSchema: z.object({ state: z.string().max(80).optional() }),
@@ -237,7 +228,7 @@ export async function assistantTools(user: Viewer | null) {
               href: "/policies/shipping",
             },
     }),
-    getPolicyLinks: tool({
+    getPolicyLinks: assistantTool({
       description:
         "Return server-approved PAYDAN policy links. Do not invent policy terms.",
       inputSchema: z.object({
@@ -253,7 +244,7 @@ export async function assistantTools(user: Viewer | null) {
         ],
       }),
     }),
-    createSourcingDraft: tool({
+    createSourcingDraft: assistantTool({
       description:
         "Provide a safe handoff to the sourcing request form; this does not submit a request.",
       inputSchema: z.object({
@@ -271,7 +262,7 @@ export async function assistantTools(user: Viewer | null) {
         draft: { productName, notes: notes || "" },
       }),
     }),
-    createSupportDraft: tool({
+    createSupportDraft: assistantTool({
       description:
         "Provide a handoff to PAYDAN support; this does not send a message.",
       inputSchema: z.object({ subject: z.string().max(160) }),
