@@ -1,15 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { api } from "@/lib/api-client";
 import { useDemo } from "@/lib/store";
 import { formatDateTime } from "@/lib/format";
 
 export default function NotificationsPage() {
-  const { state, refresh } = useDemo();
+  const { state, actions } = useDemo();
   async function mark(id?: string) {
-    await api("/api/notifications", id ? { id } : { all: true });
-    await refresh();
+    await actions.markNotificationsRead(id);
   }
   return (
     <>

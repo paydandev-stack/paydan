@@ -14,6 +14,11 @@ import { api } from "@/lib/api-client";
 import { rememberIntent } from "@/lib/intent";
 import { toViewerProducts } from "@/lib/catalog-dto";
 import { ProductCard } from "@/components/product-card";
+import { AssistantRichText } from "@/components/assistant/assistant-rich-text";
+import {
+  AssistantCartResult,
+  type AssistantCartLine,
+} from "@/components/assistant/assistant-cart-result";
 import {
   CloseIcon,
   MinusIcon,
@@ -28,6 +33,7 @@ import {
 type CartProposalAction =
   | "add_to_cart"
   | "remove_cart_line"
+  | "remove_cart_lines"
   | "set_cart_quantity"
   | "clear_cart";
 type Message = {
@@ -35,13 +41,15 @@ type Message = {
   role: "user" | "assistant";
   text: string;
   productIds?: string[];
+  cartLines?: AssistantCartLine[];
   links?: { label: string; href: string }[];
   cartProposal?: {
     proposalId: string;
     action: CartProposalAction;
     summary: Record<string, unknown>;
   };
-  proposalStatus?: "pending" | "confirming" | "confirmed" | "cancelled" | "failed";
+  proposalStatus?:
+    "pending" | "confirming" | "confirmed" | "cancelled" | "failed";
   error?: boolean;
 };
 // Proposal payloads changed in v3 (remove, quantity and clear actions). Do not
@@ -275,6 +283,16 @@ export function AskPaydan() {
                 action: data.action as CartProposalAction,
                 summary: (data.summary || {}) as Record<string, unknown>,
               };
+            if (data.kind === "cart" && Array.isArray(data.lines))
+              reply.cartLines = data.lines
+                .map((line) => line as Partial<AssistantCartLine>)
+                .filter(
+                  (line): line is AssistantCartLine =>
+                    typeof line.productId === "string" &&
+                    typeof line.variantId === "string" &&
+                    typeof line.productName === "string" &&
+                    typeof line.quantity === "number",
+                );
             if (Array.isArray(data.links))
               reply.links = data.links as Message["links"];
             if (data.kind === "auth-required" && typeof data.href === "string")
@@ -366,6 +384,70 @@ export function AskPaydan() {
       setBusy(false);
     }
   }
+  async function prepareRemoval(lines: AssistantCartLine[]) {
+    if (!lines.length || busy) return;
+    if (!state.customerSession) {
+      rememberIntent({ path: "/cart" });
+      location.assign("/login");
+      return;
+    }
+    setBusy(true);
+    try {
+      const input =
+        lines.length === 1
+          ? {
+              action: "remove_cart_line" as const,
+              productId: lines[0].productId,
+              variantId: lines[0].variantId,
+            }
+          : {
+              action: "remove_cart_lines" as const,
+              lines: lines.map(({ productId, variantId }) => ({
+                productId,
+                variantId,
+              })),
+            };
+      const proposal = await api<{
+        proposalId: string;
+        action: CartProposalAction;
+        summary: Record<string, unknown>;
+      }>("/api/assistant/proposals", input);
+      setThread((current) => ({
+        ...current,
+        messages: [
+          ...current.messages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text:
+              lines.length === 1
+                ? "I’ve prepared this item for removal. Confirm below before the cart changes."
+                : `I’ve prepared ${lines.length} cart lines for removal. Confirm below before the cart changes.`,
+            cartProposal: proposal,
+            proposalStatus: "pending",
+          },
+        ],
+      }));
+    } catch (error) {
+      setThread((current) => ({
+        ...current,
+        messages: [
+          ...current.messages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text:
+              error instanceof Error
+                ? error.message
+                : "I couldn’t prepare that cart change.",
+            error: true,
+          },
+        ],
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function cancelProposal(message: Message) {
     if (!message.cartProposal || busy) return;
     setBusy(true);
@@ -377,7 +459,11 @@ export function AskPaydan() {
         ...t,
         messages: t.messages.map((m) =>
           m.id === message.id
-            ? { ...m, proposalStatus: "cancelled", text: "Cart change cancelled." }
+            ? {
+                ...m,
+                proposalStatus: "cancelled",
+                text: "Cart change cancelled.",
+              }
             : m,
         ),
       }));
@@ -389,7 +475,10 @@ export function AskPaydan() {
             ? {
                 ...m,
                 proposalStatus: "failed",
-                text: error instanceof Error ? error.message : "The proposal could not be cancelled.",
+                text:
+                  error instanceof Error
+                    ? error.message
+                    : "The proposal could not be cancelled.",
                 error: true,
               }
             : m,
@@ -473,10 +562,18 @@ export function AskPaydan() {
       {
         left:
           current.left +
-          (event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0),
+          (event.key === "ArrowLeft"
+            ? -amount
+            : event.key === "ArrowRight"
+              ? amount
+              : 0),
         top:
           current.top +
-          (event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0),
+          (event.key === "ArrowUp"
+            ? -amount
+            : event.key === "ArrowDown"
+              ? amount
+              : 0),
       },
       true,
     );
@@ -644,6 +741,7 @@ export function AskPaydan() {
             ? {
                 add_to_cart: "Add to cart",
                 remove_cart_line: "Remove cart item",
+                remove_cart_lines: "Remove selected cart items",
                 set_cart_quantity: "Change cart quantity",
                 clear_cart: "Clear cart",
               }[proposal.action]
@@ -653,7 +751,19 @@ export function AskPaydan() {
               key={message.id}
               className={`ask-msg ${message.role === "user" ? "user" : "bot"}${message.error ? " error" : ""}`}
             >
-              <p>{message.text}</p>
+              <AssistantRichText
+                text={message.text}
+                suppressTables={Boolean(
+                  message.cartLines?.length || message.productIds?.length,
+                )}
+              />
+              {message.cartLines?.length ? (
+                <AssistantCartResult
+                  lines={message.cartLines}
+                  busy={busy}
+                  onPrepareRemoval={prepareRemoval}
+                />
+              ) : null}
               {message.productIds && (
                 <div className="ask-products">
                   {toViewerProducts(
@@ -668,12 +778,15 @@ export function AskPaydan() {
               )}
               {proposal && (
                 <div className="ask-confirm">
-                  <span className="ask-confirm-label">Requires confirmation</span>
+                  <span className="ask-confirm-label">
+                    Requires confirmation
+                  </span>
                   <strong>{proposalTitle}</strong>
                   {typeof summary.productName === "string" ? (
                     <span>{summary.productName}</span>
                   ) : null}
-                  {typeof summary.variantLabel === "string" && summary.variantLabel ? (
+                  {typeof summary.variantLabel === "string" &&
+                  summary.variantLabel ? (
                     <small>{summary.variantLabel}</small>
                   ) : null}
                   {proposal.action === "add_to_cart" ? (
@@ -681,23 +794,32 @@ export function AskPaydan() {
                   ) : null}
                   {proposal.action === "set_cart_quantity" ? (
                     <small>
-                      Quantity: {String(summary.oldQuantity)} → {String(summary.newQuantity)}
+                      Quantity: {String(summary.oldQuantity)} →{" "}
+                      {String(summary.newQuantity)}
                     </small>
                   ) : null}
-                  {proposal.action === "clear_cart" ? (
+                  {proposal.action === "clear_cart" ||
+                  proposal.action === "remove_cart_lines" ? (
                     <small>
-                      {String(summary.lineCount || 0)} cart lines · {String(summary.itemCount || 0)} items
+                      {String(summary.lineCount || 0)} cart lines ·{" "}
+                      {String(summary.itemCount || 0)} items
                     </small>
                   ) : null}
                   {message.proposalStatus === "confirmed" ||
                   message.proposalStatus === "cancelled" ? (
-                    <span className={`ask-proposal-state ${message.proposalStatus}`}>
-                      {message.proposalStatus === "confirmed" ? "Confirmed" : "Cancelled"}
+                    <span
+                      className={`ask-proposal-state ${message.proposalStatus}`}
+                    >
+                      {message.proposalStatus === "confirmed"
+                        ? "Confirmed"
+                        : "Cancelled"}
                     </span>
                   ) : (
                     <div className="ask-confirm-actions">
                       <button
-                        disabled={busy || message.proposalStatus === "confirming"}
+                        disabled={
+                          busy || message.proposalStatus === "confirming"
+                        }
                         onClick={() => void confirm(message)}
                       >
                         {message.proposalStatus === "confirming"
@@ -708,7 +830,9 @@ export function AskPaydan() {
                       </button>
                       <button
                         className="quiet"
-                        disabled={busy || message.proposalStatus === "confirming"}
+                        disabled={
+                          busy || message.proposalStatus === "confirming"
+                        }
                         onClick={() => void cancelProposal(message)}
                       >
                         Cancel

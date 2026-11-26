@@ -40,9 +40,8 @@ vi.mock("../src/server/db", async (original) => {
   };
 });
 vi.mock("../src/server/mail/transport", async (original) => {
-  const actual = await original<
-    typeof import("../src/server/mail/transport")
-  >();
+  const actual =
+    await original<typeof import("../src/server/mail/transport")>();
   return {
     ...actual,
     mailTransport: () => ({
@@ -68,7 +67,10 @@ import { refundReturn, verifyRefund } from "../src/server/refunds";
 import { readMedia, beginUpload, finalizeUpload } from "../src/server/media";
 import { catalogCdnUrl, isCatalogCdnUrl } from "../src/server/media-delivery";
 import { chat, confirmAssistantProposal } from "../src/server/assistant";
-import { cancelCartProposal } from "../src/server/assistant/proposals";
+import {
+  cancelCartProposal,
+  createCartProposal,
+} from "../src/server/assistant/proposals";
 import { assistantConfig } from "../src/server/assistant/config";
 import { cloudFrontObjectUrl } from "../src/server/cloudfront";
 import { enqueueMail } from "../src/server/mail/queue";
@@ -96,6 +98,13 @@ import { GET as listProducts } from "../src/app/api/products/route";
 import { GET as productDetail } from "../src/app/api/products/[slug]/route";
 import { publishScheduledProducts } from "../src/server/product-scheduling";
 import { expireSourcingQuotes } from "../src/server/sourcing-expiry";
+import {
+  deleteOwnReview,
+  editOwnReview,
+  moderateReview,
+  reviewsForProduct,
+  submitProductReview,
+} from "../src/server/reviews";
 
 const alice = { id: "alice", email: "alice@example.com", name: "Alice" };
 const bob = { id: "bob", email: "bob@example.com", name: "Bob" };
@@ -178,6 +187,7 @@ beforeAll(async () => {
     "007_push_tokens.sql",
     "008_push_outbox.sql",
     "009_assistant_cart_actions.sql",
+    "010_reviews_and_multi_remove.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
@@ -185,7 +195,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await harness.db.exec(
-    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread",
+    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread,product_review",
   );
   await put(database(), "products", product.id, product);
   await put(database(), "categories", "phones", {
@@ -801,7 +811,11 @@ describe("authentication and assistant", () => {
     const quantityId = crypto.randomUUID();
     await database().query(
       "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'set_cart_quantity',$3,now()+interval '15 minutes')",
-      [quantityId, alice.id, JSON.stringify({ productId: "p1", variantId: "v1", quantity: 4 })],
+      [
+        quantityId,
+        alice.id,
+        JSON.stringify({ productId: "p1", variantId: "v1", quantity: 4 }),
+      ],
     );
     await confirmAssistantProposal(alice, { proposalId: quantityId });
     expect((await snapshot(alice)).cart[0].quantity).toBe(4);
@@ -809,7 +823,11 @@ describe("authentication and assistant", () => {
     const cancelledId = crypto.randomUUID();
     await database().query(
       "INSERT INTO assistant_proposal(id,owner_id,action,payload,expires_at) VALUES($1,$2,'remove_cart_line',$3,now()+interval '15 minutes')",
-      [cancelledId, alice.id, JSON.stringify({ productId: "p1", variantId: "v1" })],
+      [
+        cancelledId,
+        alice.id,
+        JSON.stringify({ productId: "p1", variantId: "v1" }),
+      ],
     );
     await cancelCartProposal(alice, { proposalId: cancelledId });
     await expect(
@@ -823,6 +841,120 @@ describe("authentication and assistant", () => {
     );
     await confirmAssistantProposal(alice, { proposalId: clearId });
     expect((await snapshot(alice)).cart).toEqual([]);
+  });
+  it("removes several selected cart lines only after confirmation", async () => {
+    const second = {
+      ...product,
+      id: "p2",
+      slug: "phone-two",
+      sku: "PHONE-TWO",
+      name: "A second phone",
+      variants: [{ ...product.variants[0], id: "v2", sku: "PHONE-2" }],
+    };
+    await put(database(), "products", second.id, second);
+    await put(
+      database(),
+      "accounts",
+      alice.id,
+      {
+        cart: [
+          { productId: "p1", variantId: "v1", quantity: 1 },
+          { productId: "p2", variantId: "v2", quantity: 2 },
+        ],
+      },
+      alice.id,
+    );
+    const proposal = await createCartProposal(alice, {
+      action: "remove_cart_lines",
+      lines: [
+        { productId: "p1", variantId: "v1" },
+        { productId: "p2", variantId: "v2" },
+      ],
+    });
+    expect((await snapshot(alice)).cart).toHaveLength(2);
+    await confirmAssistantProposal(alice, { proposalId: proposal.proposalId });
+    expect((await snapshot(alice)).cart).toEqual([]);
+  });
+});
+
+describe("verified product reviews", () => {
+  it("moderates delivered-purchase reviews and returns edited reviews to pending", async () => {
+    const delivered: Order = {
+      id: "review-order",
+      reference: "PD-REVIEW-1",
+      customerId: alice.id,
+      customerName: alice.name,
+      customerEmail: alice.email,
+      customerPhone: "08012345678",
+      placedAt: new Date().toISOString(),
+      paymentStatus: "paid",
+      fulfillmentStatus: "delivered",
+      paymentMethod: "paystack",
+      items: [
+        {
+          lineId: "review-line",
+          productId: "p1",
+          variantId: "v1",
+          sku: "PHONE-1",
+          name: product.name,
+          variantLabel: "Black",
+          image: product.images[0],
+          unitPrice: product.price,
+          costPrice: product.costPrice,
+          quantity: 1,
+          vendorId: product.vendorId,
+          categorySlug: product.categorySlug,
+        },
+      ],
+      subtotal: product.price,
+      deliveryFee: 0,
+      discount: 0,
+      total: product.price,
+      address: { ...input.address, id: "review-address", isDefault: false },
+      vendorGroups: [],
+      timeline: [
+        {
+          label: "Delivered",
+          at: new Date().toISOString(),
+          done: true,
+        },
+      ],
+      notes: "",
+      trackingCode: "review-tracking",
+    };
+    await put(database(), "orders", delivered.id, delivered, alice.id);
+
+    const submitted = await submitProductReview(alice, {
+      productId: "p1",
+      orderId: delivered.id,
+      orderLineId: "review-line",
+      rating: 5,
+      title: "Excellent purchase",
+      body: "The item arrived in good condition and works exactly as expected.",
+    });
+    expect(submitted.status).toBe("pending");
+    const pending = await reviewsForProduct("p1", alice);
+    expect(pending.reviews).toHaveLength(0);
+    expect(pending.ownReviews).toHaveLength(1);
+    expect(pending.eligibility).toHaveLength(0);
+
+    await moderateReview(admin, {
+      id: submitted.id,
+      status: "published",
+      adminResponse: "Thank you for sharing your experience.",
+    });
+    const published = await reviewsForProduct("p1", null);
+    expect(published.summary).toMatchObject({ count: 1, average: 5 });
+    expect(published.reviews[0].adminResponse).toContain("Thank you");
+
+    await editOwnReview(alice, submitted.id, {
+      rating: 4,
+      title: "Still a strong purchase",
+      body: "The item is still very good, with one small detail worth noting.",
+    });
+    expect((await reviewsForProduct("p1", null)).reviews).toHaveLength(0);
+    await deleteOwnReview(alice, submitted.id);
+    expect((await reviewsForProduct("p1", alice)).eligibility).toHaveLength(1);
   });
 });
 

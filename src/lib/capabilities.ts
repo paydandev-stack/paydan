@@ -21,6 +21,8 @@ export type AdminCapability =
   | "refunds.issue"
   | "returns.read"
   | "returns.review"
+  | "reviews.read"
+  | "reviews.moderate"
   | "services.read"
   | "settings.manage"
   | "shipping.write"
@@ -53,6 +55,8 @@ const ALL_CAPABILITIES: AdminCapability[] = [
   "refunds.issue",
   "returns.read",
   "returns.review",
+  "reviews.read",
+  "reviews.moderate",
   "services.read",
   "settings.manage",
   "shipping.write",
@@ -76,6 +80,8 @@ export const ROLE_CAPABILITIES: Record<AdminRole, readonly AdminCapability[]> =
       "inventory.read",
       "inventory.write",
       "promotions.write",
+      "reviews.read",
+      "reviews.moderate",
       "vendors.read",
     ],
     "Order Manager": [
@@ -85,6 +91,8 @@ export const ROLE_CAPABILITIES: Record<AdminRole, readonly AdminCapability[]> =
       "refunds.issue",
       "returns.read",
       "returns.review",
+      "reviews.read",
+      "reviews.moderate",
       "shipping.write",
     ],
     "Procurement Manager": [
@@ -100,6 +108,8 @@ export const ROLE_CAPABILITIES: Record<AdminRole, readonly AdminCapability[]> =
       "orders.read",
       "returns.read",
       "returns.review",
+      "reviews.read",
+      "reviews.moderate",
       "sourcing.read",
       "support.read",
       "support.write",
@@ -132,6 +142,7 @@ const ADMIN_ROUTE_CAPABILITIES: Array<
   ["/admin/vendors", "vendors.read"],
   ["/admin/customers", "customers.read"],
   ["/admin/returns", "returns.read"],
+  ["/admin/reviews", "reviews.read"],
   ["/admin/support", "support.read"],
   ["/admin/analytics", "analytics.read"],
   ["/admin/audit", "audit.read"],

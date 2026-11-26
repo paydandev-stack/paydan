@@ -17,7 +17,7 @@ import { put, record, transaction } from "./db";
 
 type Identity = { id: string; name: string; email: string };
 
-const TEST_DATA_VERSION = 3;
+const TEST_DATA_VERSION = 4;
 const TEST_KINDS = [
   "testProducts",
   "testVendors",
@@ -147,6 +147,8 @@ export async function ensureTestBuyerData(user: Identity) {
     );
     if (marker?.version === TEST_DATA_VERSION) return false;
 
+    await db.query("DELETE FROM product_review WHERE owner_id=$1", [user.id]);
+
     await db.query(
       `DELETE FROM commerce_record
        WHERE owner_id=$1
@@ -164,6 +166,55 @@ export async function ensureTestBuyerData(user: Identity) {
     const orders = testOrders(user);
     for (const order of orders)
       await put(db, "testOrders", order.id, order, user.id);
+
+    await db.query(
+      `UPDATE commerce_record
+       SET data=data || '{"rating":0,"reviewCount":0}'::jsonb, updated_at=now()
+       WHERE kind='testProducts' AND owner_id=$1`,
+      [user.id],
+    );
+    const reviewLines = orders
+      .filter(
+        (order) =>
+          order.paymentStatus === "paid" &&
+          order.fulfillmentStatus === "delivered",
+      )
+      .flatMap((order) =>
+        order.items
+          .map((item) => ({ order, item }))
+          .filter(({ item }) => item.lineId),
+      )
+      .slice(0, 2);
+    for (const [index, { order, item }] of reviewLines.entries()) {
+      const rating = index === 0 ? 5 : 4;
+      await db.query(
+        `INSERT INTO product_review(
+          id,product_id,owner_id,reviewer_name,order_id,order_line_id,
+          rating,title,body,status,moderated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'published',now())
+        ON CONFLICT(owner_id,order_line_id) DO NOTHING`,
+        [
+          `00000000-0000-4000-8000-${String(101 + index).padStart(12, "0")}`,
+          item.productId,
+          user.id,
+          user.name,
+          order.id,
+          item.lineId,
+          rating,
+          index === 0 ? "A strong sample purchase" : "Useful and as described",
+          index === 0
+            ? "This demonstration review shows how verified buyer feedback appears after moderation."
+            : "A second sample comment helps demonstrate the product rating and moderation workflow.",
+        ],
+      );
+      await db.query(
+        `UPDATE commerce_record SET data=data || jsonb_build_object(
+          'rating',$3::int,'reviewCount',1
+        ), updated_at=now()
+        WHERE kind='testProducts' AND owner_id=$1 AND id=$2`,
+        [user.id, item.productId, rating],
+      );
+    }
     for (const request of testSourcing(user))
       await put(db, "testSourcing", request.id, request, user.id);
     for (const request of testReturns(user, orders))

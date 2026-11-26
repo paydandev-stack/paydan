@@ -158,6 +158,9 @@ export async function assistantTools(user: Viewer | null) {
                   productName: product?.name || "Unavailable item",
                   variantLabel: variant?.label || "",
                   price: variant?.price,
+                  lineTotal: variant ? variant.price * line.quantity : undefined,
+                  image: product?.images[0],
+                  slug: product?.slug,
                 };
               }),
             }

@@ -379,6 +379,23 @@ export type Notification = {
   readAt?: string;
 };
 
+export type ProductReviewStatus = "pending" | "published" | "rejected";
+
+export type ProductReview = {
+  id: string;
+  productId: string;
+  productName?: string;
+  reviewerName: string;
+  rating: number;
+  title: string;
+  body: string;
+  status: ProductReviewStatus;
+  verifiedPurchase: boolean;
+  adminResponse?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CustomerSession = {
   id: string;
   name: string;

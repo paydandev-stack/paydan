@@ -20,6 +20,18 @@ export const cartProposalInput = z.discriminatedUnion("action", [
     variantId: z.string().max(160),
   }),
   z.object({
+    action: z.literal("remove_cart_lines"),
+    lines: z
+      .array(
+        z.object({
+          productId: z.string().max(160),
+          variantId: z.string().max(160),
+        }),
+      )
+      .min(1)
+      .max(20),
+  }),
+  z.object({
     action: z.literal("set_cart_quantity"),
     productId: z.string().max(160),
     variantId: z.string().max(160),
@@ -43,23 +55,46 @@ function lineSummary(
   return { line, product, variant };
 }
 
-export async function createCartProposal(
-  user: Viewer,
-  raw: CartProposalInput,
-) {
+export async function createCartProposal(user: Viewer, raw: CartProposalInput) {
   const input = cartProposalInput.parse(raw);
   const state = await snapshot(user);
   let summary: Record<string, unknown>;
 
   if (input.action === "clear_cart") {
-    if (!state.cart.length) throw new HttpError(409, "Your cart is already empty.");
+    if (!state.cart.length)
+      throw new HttpError(409, "Your cart is already empty.");
     summary = {
       lineCount: state.cart.length,
       itemCount: state.cart.reduce((total, line) => total + line.quantity, 0),
-      productNames: state.cart.slice(0, 4).map((line) =>
-        state.products.find((product) => product.id === line.productId)?.name ||
-        "Unavailable item",
+      productNames: state.cart
+        .slice(0, 4)
+        .map(
+          (line) =>
+            state.products.find((product) => product.id === line.productId)
+              ?.name || "Unavailable item",
+        ),
+    };
+  } else if (input.action === "remove_cart_lines") {
+    const selected = input.lines.map((selectedLine) => {
+      const { line, product, variant } = lineSummary(
+        state,
+        selectedLine.productId,
+        selectedLine.variantId,
+      );
+      if (!line || !product || !variant)
+        throw new HttpError(
+          409,
+          "One of those items is no longer in your cart.",
+        );
+      return { line, product, variant };
+    });
+    summary = {
+      lineCount: selected.length,
+      itemCount: selected.reduce(
+        (total, item) => total + item.line.quantity,
+        0,
       ),
+      productNames: selected.map((item) => item.product.name),
     };
   } else {
     const { line, product, variant } = lineSummary(
@@ -78,7 +113,8 @@ export async function createCartProposal(
         quantity: input.quantity,
       };
     } else {
-      if (!line) throw new HttpError(409, "That item is no longer in your cart.");
+      if (!line)
+        throw new HttpError(409, "That item is no longer in your cart.");
       summary = {
         productName: product.name,
         variantLabel: variant.label,
@@ -159,6 +195,27 @@ export async function confirmCartProposal(user: Viewer, raw: unknown) {
       [payload.productId, payload.variantId],
       proposalId,
     );
+  } else if (payload.action === "remove_cart_lines") {
+    const state = await snapshot(user);
+    for (const [index, selected] of payload.lines.entries()) {
+      if (
+        !state.cart.some(
+          (line) =>
+            line.productId === selected.productId &&
+            line.variantId === selected.variantId,
+        )
+      )
+        throw new HttpError(
+          409,
+          "One of those items is no longer in your cart.",
+        );
+      await command(
+        user,
+        "removeLine",
+        [selected.productId, selected.variantId],
+        `${proposalId}:${index}`,
+      );
+    }
   } else if (payload.action === "set_cart_quantity")
     await command(
       user,
@@ -172,7 +229,11 @@ export async function confirmCartProposal(user: Viewer, raw: unknown) {
     "UPDATE assistant_proposal SET status='confirmed',confirmed_at=now() WHERE id=$1 AND owner_id=$2 AND status='pending'",
     [proposalId, user.id],
   );
-  return { confirmed: true, status: "confirmed" as const, action: payload.action };
+  return {
+    confirmed: true,
+    status: "confirmed" as const,
+    action: payload.action,
+  };
 }
 
 export async function cancelCartProposal(user: Viewer, raw: unknown) {
@@ -186,6 +247,7 @@ export async function cancelCartProposal(user: Viewer, raw: unknown) {
     "UPDATE assistant_proposal SET status='cancelled' WHERE id=$1 AND owner_id=$2 AND status='pending' RETURNING id",
     [proposalId, user.id],
   );
-  if (!result.rows.length) throw new HttpError(409, "This proposal is no longer pending.");
+  if (!result.rows.length)
+    throw new HttpError(409, "This proposal is no longer pending.");
   return { cancelled: true, status: "cancelled" as const };
 }

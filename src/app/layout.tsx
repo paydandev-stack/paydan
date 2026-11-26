@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { cache } from "react";
 import { DemoProvider } from "@/lib/store";
 import { ToastViewport } from "@/components/toast-viewport";
 import { SubtleMotion } from "@/components/subtle-motion";
@@ -23,12 +24,14 @@ const newsreader = localFont({
   adjustFontFallback: "Times New Roman",
 });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
+
+const loadPublicCatalog = cache(publicCatalogSnapshot);
 
 const indexingEnabled = process.env.SITE_INDEXING_ENABLED === "true";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const state = await publicCatalogSnapshot();
+  const state = await loadPublicCatalog();
   const storeName = state.settings.storeName || "Paydan";
   return {
     title: {
@@ -45,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const initialState = await publicCatalogSnapshot();
+  const initialState = await loadPublicCatalog();
   return (
     <html lang="en-NG" className={`${manrope.variable} ${newsreader.variable}`}>
       <body>

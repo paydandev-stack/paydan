@@ -86,15 +86,18 @@ export async function snapshot(
   if (!process.env.DATABASE_URL) return fixturePublicSnapshot();
   const db = database();
   const operations = admin && Boolean(user?.role);
-  for (const kind of [
-    "products",
-    "categories",
-    "banners",
-    "shippingZones",
-  ] as const) {
-    // Each entity is stored separately; customer ownership never comes from the request body.
-    (state[kind] as unknown[]) = await records(db, kind);
-  }
+  const [products, categories, banners, shippingZones, settings] =
+    await Promise.all([
+      records<Product>(db, "products"),
+      records<DemoState["categories"][number]>(db, "categories"),
+      records<DemoState["banners"][number]>(db, "banners"),
+      records<DemoState["shippingZones"][number]>(db, "shippingZones"),
+      record<Partial<DemoState["settings"]>>(db, "settings", "store"),
+    ]);
+  state.products = products;
+  state.categories = categories;
+  state.banners = banners;
+  state.shippingZones = shippingZones;
   const testBuyer = isTestBuyer(user);
   state.dataScope = testBuyer ? "test" : "production";
   if (testBuyer && user) {
@@ -103,7 +106,7 @@ export async function snapshot(
   }
   state.settings = {
     ...state.settings,
-    ...(await record(db, "settings", "store")),
+    ...settings,
     transferEnabled: false,
   };
   if (!operations || !hasCapability(user?.role, "settings.manage")) {
@@ -148,7 +151,31 @@ export async function snapshot(
   if (!user) state.shippingZones = [];
   if (user) {
     state.customerSession = { id: user.id, name: user.name, email: user.email };
-    const account = await record<Partial<DemoState>>(db, "accounts", user.id);
+    const [account, orders, sourcing, returns, notifications, profile] =
+      await Promise.all([
+        record<Partial<DemoState>>(db, "accounts", user.id),
+        records<Order>(db, testBuyer ? "testOrders" : "orders", user.id),
+        records<SourcingRequest>(
+          db,
+          testBuyer ? "testSourcing" : "sourcing",
+          user.id,
+        ),
+        records<DemoState["returns"][number]>(
+          db,
+          testBuyer ? "testReturns" : "returns",
+          user.id,
+        ),
+        testBuyer
+          ? testNotificationsFor(db, user.id)
+          : notificationsFor(db, user.id),
+        record<{
+          phone?: string;
+          city?: string;
+          state?: string;
+          tags?: string[];
+          marketingConsent?: boolean;
+        }>(db, "customers", user.id),
+      ]);
     for (const key of [
       "cart",
       "wishlist",
@@ -162,31 +189,10 @@ export async function snapshot(
       if (account?.[key] !== undefined)
         Object.assign(state, { [key]: account[key] });
     }
-    state.orders = (
-      await records<Order>(db, testBuyer ? "testOrders" : "orders", user.id)
-    ).map(customerOrder) as unknown as Order[];
-    state.sourcing = (
-      await records<SourcingRequest>(
-        db,
-        testBuyer ? "testSourcing" : "sourcing",
-        user.id,
-      )
-    ).map(customerRequest) as SourcingRequest[];
-    state.returns = await records(
-      db,
-      testBuyer ? "testReturns" : "returns",
-      user.id,
-    );
-    state.notifications = testBuyer
-      ? await testNotificationsFor(db, user.id)
-      : await notificationsFor(db, user.id);
-    const profile = await record<{
-      phone?: string;
-      city?: string;
-      state?: string;
-      tags?: string[];
-      marketingConsent?: boolean;
-    }>(db, "customers", user.id);
+    state.orders = orders.map(customerOrder) as unknown as Order[];
+    state.sourcing = sourcing.map(customerRequest) as SourcingRequest[];
+    state.returns = returns;
+    state.notifications = notifications;
     state.customers = [
       {
         id: user.id,

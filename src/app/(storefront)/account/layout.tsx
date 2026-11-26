@@ -58,6 +58,7 @@ export default function AccountLayout({ children }: { children: ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
+              prefetch
               className={pathname === item.href ? "active" : undefined}
             >
               {item.label}

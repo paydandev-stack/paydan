@@ -14,6 +14,7 @@ import { visibleProducts } from "@/lib/catalog";
 import { toViewerProducts } from "@/lib/catalog-dto";
 import { api } from "@/lib/api-client";
 import type { Product } from "@/lib/types";
+import { ProductReviews } from "@/components/reviews/product-reviews";
 
 const MAX_QUANTITY = 10;
 
@@ -91,6 +92,19 @@ export default function ProductPage() {
   const discount = percentOff(variant.price, variant.compareAt);
   const soldOut = variant.availability === "out_of_stock";
   const saved = state.wishlist.includes(product.id);
+  const productLabels = [
+    category?.name ?? product.categorySlug,
+    product.brand,
+    product.vendorName,
+  ].filter(
+    (label, index, labels): label is string =>
+      Boolean(label?.trim()) &&
+      labels.findIndex(
+        (candidate) =>
+          candidate?.trim().toLocaleLowerCase() ===
+          label?.trim().toLocaleLowerCase(),
+      ) === index,
+  );
 
   // Guest-accessible page: the related strip receives viewer-scoped DTOs so an
   // anonymous visitor's bundle carries no monetary fields for these either.
@@ -156,10 +170,7 @@ export default function ProductPage() {
         </div>
 
         <div className="pdp-info">
-          <span className="eyebrow">
-            {category?.name ?? product.categorySlug} · {product.brand}
-            {product.vendorName ? ` · ${product.vendorName}` : ""}
-          </span>
+          <span className="eyebrow">{productLabels.join(" · ")}</span>
           <h1>{product.name}</h1>
 
           <p className="pdp-rating">
@@ -329,6 +340,12 @@ export default function ProductPage() {
           ))}
         </dl>
       </section>
+
+      <ProductReviews
+        productId={product.id}
+        productSlug={product.slug}
+        signedIn={signedIn}
+      />
 
       {related.length ? (
         <section className="section">

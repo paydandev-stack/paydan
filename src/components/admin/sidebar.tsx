@@ -29,6 +29,7 @@ export const adminNav: NavGroup[] = [
     label: "Catalogue",
     items: [
       { href: "/admin/products", label: "Products" },
+      { href: "/admin/reviews", label: "Reviews" },
       { href: "/admin/inventory", label: "Inventory" },
       { href: "/admin/categories", label: "Categories" },
       { href: "/admin/vendors", label: "Vendors" },

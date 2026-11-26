@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/product-card";
 import { CloseIcon, SlidersIcon } from "@/components/icons";
@@ -75,7 +82,23 @@ export type CatalogViewProps = {
  * Shared listing surface for /shop, /deals, /new-arrivals, /search and every
  * /category/[slug] page. Filters are applied in memory over store records.
  */
-export function CatalogView({
+export function CatalogView(props: CatalogViewProps) {
+  return (
+    <Suspense
+      fallback={
+        <div className="wrap catalog-page">
+          <div className="empty">
+            <h3>Loading products…</h3>
+          </div>
+        </div>
+      }
+    >
+      <CatalogViewInner {...props} />
+    </Suspense>
+  );
+}
+
+function CatalogViewInner({
   crumbs,
   eyebrow,
   title,

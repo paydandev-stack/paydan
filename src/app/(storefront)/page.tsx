@@ -72,7 +72,8 @@ export default function HomePage() {
       (left, right) =>
         (left.homepageOrder ?? left.order) -
         (right.homepageOrder ?? right.order),
-    );
+    )
+    .slice(0, 12);
   const departmentCount = state.categories.length;
   const bestSaving = products.reduce((best, product) => {
     const off = percentOff(product.price, product.compareAt) ?? 0;

@@ -71,6 +71,7 @@ type Actions = {
   saveForLater: (productId: string, variantId: string) => void;
   moveToCart: (productId: string, variantId: string) => void;
   toggleWishlist: (productId: string) => void;
+  markNotificationsRead: (id?: string) => Promise<void>;
   recordProductView: (productId: string) => void;
   placeOrder: (input: PlaceOrderInput) => Promise<Order>;
   updateOrderStatus: (
@@ -423,6 +424,30 @@ export function DemoProvider({
         return;
       }
       void run("toggleWishlist", [id]).catch(() => {});
+    };
+    result.markNotificationsRead = async (id?: string) => {
+      const readAt = new Date().toISOString();
+      setState((current) => ({
+        ...current,
+        notifications: current.notifications.map((notification) =>
+          !id || notification.id === id
+            ? { ...notification, readAt: notification.readAt || readAt }
+            : notification,
+        ),
+      }));
+      setPending((count) => count + 1);
+      try {
+        await api("/api/notifications", id ? { id } : { all: true });
+      } catch (error) {
+        await refresh();
+        notify(
+          error instanceof Error ? error.message : "Unable to update notifications.",
+          "error",
+        );
+        throw error;
+      } finally {
+        setPending((count) => count - 1);
+      }
     };
     return result as unknown as Actions;
   }, [notify, run, state.customerSession, state.cart, state.dataScope]);
