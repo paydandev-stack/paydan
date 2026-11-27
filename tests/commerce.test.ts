@@ -14,6 +14,7 @@ import { createHmac } from "node:crypto";
 const harness = vi.hoisted(() => ({
   db: null as unknown as import("@electric-sql/pglite").PGlite,
   pool: null as unknown,
+  sentMail: [] as Array<Record<string, unknown>>,
 }));
 function adapter(client: Pick<PGlite, "query">) {
   return {
@@ -45,10 +46,13 @@ vi.mock("../src/server/mail/transport", async (original) => {
   return {
     ...actual,
     mailTransport: () => ({
-      sendMail: async () => ({
-        messageId: "<verification-test@paydan.test>",
-        response: "queued verification-test-message",
-      }),
+      sendMail: async (message: Record<string, unknown>) => {
+        harness.sentMail.push(message);
+        return {
+          messageId: "<verification-test@paydan.test>",
+          response: "queued verification-test-message",
+        };
+      },
     }),
   };
 });
@@ -171,6 +175,10 @@ beforeAll(async () => {
   vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
   vi.stubEnv("PAYSTACK_SECRET_KEY", "sk_test_isolated");
   vi.stubEnv("MEDIA_CDN_URL", "https://media.paydan.test/assets");
+  vi.stubEnv(
+    "MAIL_FROM_AUTH",
+    "PAYDAN Accounts <accounts@updates.paydan.store>",
+  );
   harness.db = new PGlite();
   const client = adapter(harness.db);
   harness.pool = {
@@ -188,14 +196,16 @@ beforeAll(async () => {
     "008_push_outbox.sql",
     "009_assistant_cart_actions.sql",
     "010_reviews_and_multi_remove.sql",
+    "011_fulfillment_and_delivery.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
   await migration.runMigrations();
 });
 beforeEach(async () => {
+  harness.sentMail = [];
   await harness.db.exec(
-    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread,product_review",
+    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread,product_review,vendor_fulfillment_location,delivery_band",
   );
   await put(database(), "products", product.id, product);
   await put(database(), "categories", "phones", {
@@ -516,6 +526,22 @@ describe("persistent shopping and ownership", () => {
   });
 });
 describe("money, stock and Paystack", () => {
+  it("uses a configured proximity band and freezes the selected stock origin", async () => {
+    await database().query(
+      `INSERT INTO delivery_band(id,label,fee,transit_days_min,transit_days_max,active)
+       VALUES('interstate','Interstate',275,2,4,true)`,
+    );
+    await command(alice, "addToCart", ["p1", "v1", 1], "band-cart");
+    const quote = await quoteCart(database(), alice, input);
+    expect(quote.deliveryFee).toBe(275);
+    expect(quote.items[0]).toMatchObject({
+      fulfillmentLocationId: "legacy-primary",
+    });
+    expect("shipments" in quote && quote.shipments[0]).toMatchObject({
+      fee: 275,
+      eta: "2–4 days",
+    });
+  });
   it("calculates in kobo and applies active promotions on the server", async () => {
     await command(alice, "addToCart", ["p1", "v1", 2], "cart-money");
     await put(database(), "vouchers", "TEN", {
@@ -766,6 +792,9 @@ describe("authentication and assistant", () => {
     expect(verificationMail.rows[0].sent_at).toBeTruthy();
     expect(verificationMail.rows[0].claimed_at).toBeNull();
     expect(verificationMail.rows[0].body).toBe("");
+    expect(harness.sentMail.at(-1)?.from).toBe(
+      "PAYDAN Accounts <accounts@updates.paydan.store>",
+    );
   });
   it("keeps guest prompt injection attempts away from prices and supplier data", async () => {
     const result = await chat(null, {
@@ -1846,6 +1875,71 @@ describe("catalogue operations and order dispatch", () => {
     expect(meta!.issues.join(" ")).toContain("stock");
   });
 
+  it("creates a product and its opening inventory atomically", async () => {
+    const created: Product = {
+      ...product,
+      id: "p-atomic",
+      slug: "atomic-phone",
+      sku: "ATOMIC",
+      status: "published",
+      variants: [{ ...product.variants[0], id: "v-atomic", sku: "ATOMIC-1" }],
+    };
+    await command(
+      admin,
+      "createProduct",
+      [
+        {
+          product: created,
+          initialStock: [
+            {
+              variantId: "v-atomic",
+              available: 7,
+              reason: "Initial product setup",
+            },
+          ],
+        },
+      ],
+      "create-atomic-product",
+    );
+    expect(
+      (await record<Product>(database(), "products", created.id))?.status,
+    ).toBe("published");
+    const stock = await database().query(
+      "SELECT available,fulfillment_location_id FROM inventory WHERE product_id=$1",
+      [created.id],
+    );
+    expect(stock.rows[0]).toMatchObject({
+      available: 7,
+      fulfillment_location_id: "supplier-secret-primary",
+    });
+
+    const rejected = {
+      ...created,
+      id: "p-rejected",
+      slug: "rejected-phone",
+      sku: "REJECTED",
+      variants: [
+        { ...created.variants[0], id: "v-rejected", sku: "REJECTED-1" },
+      ],
+    };
+    await expect(
+      command(
+        admin,
+        "createProduct",
+        [
+          {
+            product: rejected,
+            initialStock: [
+              { variantId: "v-rejected", available: 2, reason: "" },
+            ],
+          },
+        ],
+        "create-rejected-product",
+      ),
+    ).rejects.toBeTruthy();
+    expect(await record(database(), "products", rejected.id)).toBeUndefined();
+  });
+
   it("records stock movements with a reason and before/after values", async () => {
     const movement = await command(
       admin,
@@ -1874,6 +1968,70 @@ describe("catalogue operations and order dispatch", () => {
         "stock-without-reason",
       ),
     ).rejects.toBeTruthy();
+  });
+
+  it("blocks removal of a fulfilment location that still owns stock", async () => {
+    const primaryLocation = {
+      id: "supplier-secret-primary",
+      vendorId: "supplier-secret",
+      label: "Lagos warehouse",
+      address: "1 Warehouse Road",
+      city: "Ikeja",
+      state: "Lagos",
+      isPrimary: true,
+      active: true,
+      pickupAvailable: true,
+      dispatchLeadTimeDays: 1,
+    };
+    const vendor = {
+      id: "supplier-secret",
+      name: "Verified Tech Vendor",
+      contactName: "Vendor Owner",
+      email: "vendor@example.com",
+      phone: "08012345678",
+      address: primaryLocation.address,
+      city: primaryLocation.city,
+      state: primaryLocation.state,
+      categorySlugs: ["phones"],
+      status: "active" as const,
+      leadTimeDays: 1,
+      paymentTerms: "Net 7",
+      notes: "",
+      reliability: 90,
+      createdAt: new Date().toISOString(),
+      fulfillmentLocations: [primaryLocation],
+    };
+    await command(admin, "saveVendor", [vendor], "save-location-owner");
+    await database().query(
+      "UPDATE inventory SET fulfillment_location_id=$1 WHERE product_id=$2",
+      [primaryLocation.id, product.id],
+    );
+
+    await expect(
+      command(
+        admin,
+        "saveVendor",
+        [
+          {
+            ...vendor,
+            address: "2 New Warehouse Road",
+            city: "Abuja",
+            state: "FCT",
+            fulfillmentLocations: [
+              {
+                ...primaryLocation,
+                id: "supplier-secret-abuja",
+                label: "Abuja warehouse",
+                address: "2 New Warehouse Road",
+                city: "Abuja",
+                state: "FCT",
+              },
+            ],
+          },
+        ],
+        "remove-stock-location",
+      ),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it("bulk dispatches paid orders with validated tracking and keeps authorization", async () => {

@@ -17,6 +17,7 @@ type StockRow = {
   product_id: string;
   variant_id: string;
   available: number;
+  fulfillment_location_id: string;
 };
 type Movement = {
   id: string;
@@ -46,6 +47,9 @@ export default function InventoryPage() {
   const [bulkReason, setBulkReason] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savedMeta, setSavedMeta] = useState<
+    Record<string, { at: string; actor: string }>
+  >({});
   const importRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -53,7 +57,11 @@ export default function InventoryPage() {
     setStock(
       Object.fromEntries(
         rows.map((row) => [
-          row.product_id + ":" + row.variant_id,
+          row.product_id +
+            ":" +
+            row.variant_id +
+            ":" +
+            row.fulfillment_location_id,
           row.available,
         ]),
       ),
@@ -61,7 +69,11 @@ export default function InventoryPage() {
     setDrafts(
       Object.fromEntries(
         rows.map((row) => [
-          row.product_id + ":" + row.variant_id,
+          row.product_id +
+            ":" +
+            row.variant_id +
+            ":" +
+            row.fulfillment_location_id,
           String(row.available),
         ]),
       ),
@@ -82,17 +94,42 @@ export default function InventoryPage() {
     return state.products
       .flatMap((product) =>
         product.variants.map((variant) => {
-          const key = product.id + ":" + variant.id;
-          const available = stock[key] ?? 0;
+          const vendorRecord = state.vendors.find(
+            (item) => item.id === product.vendorId,
+          );
+          const locations = vendorRecord?.fulfillmentLocations?.length
+            ? vendorRecord.fulfillmentLocations
+            : vendorRecord
+              ? [
+                  {
+                    id: `${vendorRecord.id}-primary`,
+                    label: "Primary fulfilment location",
+                    city: vendorRecord.city,
+                    state: vendorRecord.state,
+                  },
+                ]
+              : [];
           const vendorName =
             state.vendors.find((item) => item.id === product.vendorId)?.name ??
             product.vendorId;
           const categoryName =
             state.categories.find((item) => item.slug === product.categorySlug)
               ?.name ?? product.categorySlug;
-          return { product, variant, key, available, vendorName, categoryName };
+          return locations.map((location) => {
+            const key = product.id + ":" + variant.id + ":" + location.id;
+            return {
+              product,
+              variant,
+              location,
+              key,
+              available: stock[key] ?? 0,
+              vendorName,
+              categoryName,
+            };
+          });
         }),
       )
+      .flat()
       .filter((row) => {
         if (vendor !== "all" && row.product.vendorId !== vendor) return false;
         if (category !== "all" && row.product.categorySlug !== category)
@@ -147,6 +184,7 @@ export default function InventoryPage() {
           {
             productId: row.product.id,
             variantId: row.variant.id,
+            fulfillmentLocationId: row.location.id,
             available,
             reason,
           },
@@ -154,6 +192,13 @@ export default function InventoryPage() {
         "Stock saved with an audited movement.",
       );
       setReasons((current) => ({ ...current, [row.key]: "" }));
+      setSavedMeta((current) => ({
+        ...current,
+        [row.key]: {
+          at: new Date().toISOString(),
+          actor: state.adminSession?.name ?? "Administrator",
+        },
+      }));
     } catch (error) {
       setMessage((error as Error).message);
     } finally {
@@ -174,13 +219,14 @@ export default function InventoryPage() {
     setBusy(true);
     try {
       for (const key of selected) {
-        const [productId, variantId] = key.split(":");
+        const [productId, variantId, fulfillmentLocationId] = key.split(":");
         await api("/api/commands", {
           name: "adjustStock",
           args: [
             {
               productId,
               variantId,
+              fulfillmentLocationId,
               available,
               reason: bulkReason.trim() + " (bulk)",
             },
@@ -200,10 +246,17 @@ export default function InventoryPage() {
 
   function exportStock() {
     downloadCsv("paydan-stock.csv", [
-      ["productId", "variantId", "available", "reason"],
+      [
+        "productId",
+        "variantId",
+        "fulfillmentLocationId",
+        "available",
+        "reason",
+      ],
       ...rows.map((row) => [
         row.product.id,
         row.variant.id,
+        row.location.id,
         Number(drafts[row.key] ?? row.available),
         reasons[row.key] || "CSV export",
       ]),
@@ -225,6 +278,7 @@ export default function InventoryPage() {
             {
               productId: row[index("productId")],
               variantId: row[index("variantId")],
+              fulfillmentLocationId: row[index("fulfillmentLocationId")],
               available: Number(row[index("available")]),
               reason: row[index("reason")] || "CSV import",
             },
@@ -393,6 +447,13 @@ export default function InventoryPage() {
               state.categories.find(
                 (item) => item.slug === row.product.categorySlug,
               )?.active === false;
+            const draft = drafts[row.key] ?? String(row.available);
+            const dirty = Number(draft) !== row.available;
+            const reason = reasons[row.key]?.trim() ?? "";
+            const validQuantity =
+              Number.isInteger(Number(draft)) && Number(draft) >= 0;
+            const canSave = dirty && validQuantity && reason.length >= 3;
+            const saved = savedMeta[row.key];
             return (
               <article key={row.key}>
                 <label className="inventory-row-label">
@@ -411,7 +472,8 @@ export default function InventoryPage() {
                     <strong>{row.product.name}</strong>
                     <small>
                       {row.variant.label} · {row.variant.sku} · {row.vendorName}{" "}
-                      · {row.categoryName}
+                      · {row.categoryName} · {row.location.label} (
+                      {row.location.city}, {row.location.state})
                     </small>
                   </span>
                 </label>
@@ -425,7 +487,11 @@ export default function InventoryPage() {
                     />
                   )}
                   <label>
-                    Available
+                    Saved stock
+                    <output>{row.available}</output>
+                  </label>
+                  <label>
+                    New quantity
                     <input
                       type="number"
                       min={0}
@@ -439,6 +505,7 @@ export default function InventoryPage() {
                       }
                     />
                   </label>
+                  {dirty ? <StatusBadge value="Unsaved" tone="warn" /> : null}
                   <label>
                     Reason
                     <input
@@ -456,12 +523,26 @@ export default function InventoryPage() {
                   <button
                     className="admin-btn"
                     type="button"
-                    disabled={busy}
+                    disabled={busy || !canSave}
                     onClick={() => void save(row)}
                   >
                     Save stock
                   </button>
                 </div>
+                {dirty && !validQuantity ? (
+                  <p className="form-error">
+                    Enter a whole number of zero or more.
+                  </p>
+                ) : dirty && reason.length < 3 ? (
+                  <p className="form-error">
+                    Add a reason of at least three characters before saving.
+                  </p>
+                ) : saved ? (
+                  <p className="admin-muted">
+                    Saved at {new Date(saved.at).toLocaleString()} by{" "}
+                    {saved.actor}.
+                  </p>
+                ) : null}
                 {blocked ? (
                   <p className="admin-muted">
                     Checkout stays blocked for this variant because its

@@ -5,6 +5,7 @@ import type {
   Product,
   ShippingZone,
   Voucher,
+  Vendor,
 } from "@/lib/types";
 import {
   database,
@@ -22,6 +23,7 @@ import { enqueueMail, enqueueOperationsAlert } from "./mail/queue";
 import { isTestBuyer } from "./test-buyer";
 import { isPurchasableVariant } from "@/lib/catalog-visibility";
 import { enqueueNotification } from "./notifications";
+import { proximityLabel, vendorLocations } from "@/lib/fulfillment";
 
 type Input = ReturnType<typeof checkout.parse>;
 export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
@@ -66,10 +68,42 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
     )
       throw new HttpError(400, "Invalid cart quantity.");
     const inventory = await db.query(
-      "SELECT available FROM inventory WHERE product_id=$1 AND variant_id=$2",
-      [product.id, variant.id],
+      `SELECT available,fulfillment_location_id
+       FROM inventory
+       WHERE product_id=$1 AND variant_id=$2 AND available >= $3`,
+      [product.id, variant.id, line.quantity],
     );
-    if (!inventory.rows[0] || inventory.rows[0].available < line.quantity)
+    const vendor = await record<Vendor>(db, "vendors", product.vendorId);
+    const locations = vendor
+      ? vendorLocations(vendor).filter((location) => location.active)
+      : [];
+    const stocked = inventory.rows
+      .map((row) => ({
+        row,
+        location:
+          locations.find(
+            (location) => location.id === row.fulfillment_location_id,
+          ) ||
+          locations.find((location) => location.isPrimary) ||
+          locations[0],
+      }))
+      .filter((entry) => entry.location)
+      .sort((left, right) => {
+        const rank = (entry: typeof left) => {
+          const proximity = proximityLabel(entry.location!, input.address);
+          return proximity === "same-city"
+            ? 0
+            : proximity === "same-state"
+              ? 1
+              : 2;
+        };
+        return (
+          rank(left) - rank(right) ||
+          Number(right.row.available) - Number(left.row.available)
+        );
+      });
+    const selectedStock = stocked[0];
+    if (!selectedStock)
       throw new HttpError(
         409,
         `${product.name} has insufficient confirmed stock. Reduce the quantity or request sourcing.`,
@@ -88,6 +122,11 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
       quantity: line.quantity,
       vendorId: product.vendorId,
       categorySlug: product.categorySlug,
+      fulfillmentLocationId: selectedStock.row.fulfillment_location_id,
+      fulfillmentCity: selectedStock.location!.city,
+      fulfillmentState: selectedStock.location!.state,
+      fulfillmentDispatchLeadTimeDays:
+        selectedStock.location!.dispatchLeadTimeDays,
     });
   }
   const zones = await records<ShippingZone>(db, "shippingZones");
@@ -165,7 +204,53 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
         "This promotion has reached its discount budget.",
       );
   }
-  const deliveryFee = kobo(zone.fee);
+  const locationGroups = Object.values(
+    Object.groupBy(
+      items,
+      (item) => item.fulfillmentLocationId || item.vendorId,
+    ),
+  ).filter(Boolean) as OrderItem[][];
+  const bands = await db.query(
+    "SELECT id,label,fee,transit_days_min,transit_days_max FROM delivery_band WHERE active=true",
+  );
+  const bandById = new Map(bands.rows.map((band) => [band.id, band]));
+  const shipments = locationGroups.map((group) => {
+    const first = group[0];
+    const proximity = proximityLabel(
+      {
+        city: first.fulfillmentCity || "",
+        state: first.fulfillmentState || "",
+      },
+      input.address,
+    );
+    const bandId = proximity.replace("-", "_");
+    const band = bandById.get(bandId);
+    if (bands.rows.length && !band)
+      throw new HttpError(
+        409,
+        `Delivery pricing for ${proximity.replace("-", " ")} shipments needs a quotation.`,
+      );
+    const dispatchDays = Math.max(
+      0,
+      ...group.map((item) => item.fulfillmentDispatchLeadTimeDays ?? 0),
+    );
+    return {
+      vendorId: first.vendorId,
+      fulfillmentLocationId: first.fulfillmentLocationId,
+      originCity: first.fulfillmentCity,
+      originState: first.fulfillmentState,
+      fee: band ? Number(band.fee) : 0,
+      eta: band
+        ? `${dispatchDays + Number(band.transit_days_min)}–${dispatchDays + Number(band.transit_days_max)} days`
+        : zone.eta,
+      items: group,
+    };
+  });
+  const deliveryFee = kobo(
+    bands.rows.length
+      ? shipments.reduce((sum, shipment) => sum + shipment.fee, 0)
+      : zone.fee,
+  );
   const total = subtotal + deliveryFee - discount;
   if (!Number.isSafeInteger(total) || total <= 0)
     throw new HttpError(400, "The order total is invalid.");
@@ -177,6 +262,7 @@ export async function quoteCart(db: Queryable, user: Viewer, input: Input) {
     total: naira(total),
     amountKobo: total,
     eta: zone.eta,
+    shipments,
   };
 }
 export async function paystack(path: string, method = "GET", body?: unknown) {
@@ -240,7 +326,10 @@ export async function initialize(
       );
     const id = randomUUID();
     const reference = `PD-${randomUUID()}`;
-    const groups = Object.groupBy(quote.items, (i) => i.vendorId);
+    const groups = Object.groupBy(
+      quote.items,
+      (item) => `${item.vendorId}:${item.fulfillmentLocationId || "primary"}`,
+    );
     const value: Order = {
       id,
       reference,
@@ -261,17 +350,29 @@ export async function initialize(
         : undefined,
       total: quote.total,
       address: { ...input.address, id: randomUUID(), isDefault: false },
-      vendorGroups: Object.entries(groups).map(([vendorId, items]) => ({
-        id: randomUUID(),
-        vendorId,
-        items: items!,
-        stage: "awaiting_assignment",
-        assignee: "",
-        eta: quote.eta,
-        urgent: false,
-        notes: "",
-        updatedAt: new Date().toISOString(),
-      })),
+      vendorGroups: Object.entries(groups).map(([groupKey, items]) => {
+        const vendorId = groupKey.split(":")[0];
+        const shipment = ("shipments" in quote ? quote.shipments : []).find(
+          (candidate) =>
+            candidate.vendorId === vendorId &&
+            candidate.fulfillmentLocationId === items![0].fulfillmentLocationId,
+        );
+        return {
+          id: randomUUID(),
+          vendorId,
+          items: items!,
+          stage: "awaiting_assignment",
+          assignee: "",
+          eta: shipment?.eta || quote.eta,
+          urgent: false,
+          notes: "",
+          updatedAt: new Date().toISOString(),
+          fulfillmentLocationId: shipment?.fulfillmentLocationId,
+          originCity: shipment?.originCity,
+          originState: shipment?.originState,
+          deliveryFee: shipment?.fee,
+        };
+      }),
       timeline: [
         { label: "Awaiting payment", at: new Date().toISOString(), done: true },
       ],
@@ -280,15 +381,40 @@ export async function initialize(
     };
     const cart = (await account(db, user)).cart;
     for (const line of cart) {
+      const quotedItem = quote.items.find(
+        (item) =>
+          item.productId === line.productId &&
+          item.variantId === line.variantId,
+      );
+      if (!quotedItem?.fulfillmentLocationId)
+        throw new HttpError(
+          409,
+          "A fulfilment location is no longer available.",
+        );
       const reserved = await db.query(
-        "UPDATE inventory SET available=available-$3,updated_at=now() WHERE product_id=$1 AND variant_id=$2 AND available >= $3 RETURNING available",
-        [line.productId, line.variantId, line.quantity],
+        `UPDATE inventory SET available=available-$4,updated_at=now()
+         WHERE product_id=$1 AND variant_id=$2 AND fulfillment_location_id=$3
+           AND available >= $4 RETURNING available`,
+        [
+          line.productId,
+          line.variantId,
+          quotedItem.fulfillmentLocationId,
+          line.quantity,
+        ],
       );
       if (!reserved.rows.length)
         throw new HttpError(409, "Stock changed. Review your cart.");
       await db.query(
-        "INSERT INTO inventory_reservation(order_id,product_id,variant_id,quantity) VALUES($1,$2,$3,$4)",
-        [id, line.productId, line.variantId, line.quantity],
+        `INSERT INTO inventory_reservation(
+          order_id,product_id,variant_id,fulfillment_location_id,quantity
+        ) VALUES($1,$2,$3,$4,$5)`,
+        [
+          id,
+          line.productId,
+          line.variantId,
+          quotedItem.fulfillmentLocationId,
+          line.quantity,
+        ],
       );
     }
     await put(db, "orders", id, value, user.id);
@@ -402,8 +528,14 @@ export async function verifyPayment(reference: string, user?: Viewer) {
         );
         for (const item of reservations.rows)
           await db.query(
-            "UPDATE inventory SET available=available+$3 WHERE product_id=$1 AND variant_id=$2",
-            [item.product_id, item.variant_id, item.quantity],
+            `UPDATE inventory SET available=available+$4
+             WHERE product_id=$1 AND variant_id=$2 AND fulfillment_location_id=$3`,
+            [
+              item.product_id,
+              item.variant_id,
+              item.fulfillment_location_id,
+              item.quantity,
+            ],
           );
         await db.query(
           "UPDATE payment SET status='failed' WHERE reference=$1",
@@ -485,7 +617,7 @@ export async function verifyPayment(reference: string, user?: Viewer) {
       email: order.customerEmail,
     });
     const purchased = await db.query(
-      "SELECT product_id,variant_id,quantity FROM inventory_reservation WHERE order_id=$1",
+      "SELECT product_id,variant_id,fulfillment_location_id,quantity FROM inventory_reservation WHERE order_id=$1",
       [order.id],
     );
     for (const item of purchased.rows) {

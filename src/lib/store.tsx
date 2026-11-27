@@ -90,6 +90,14 @@ type Actions = {
   ) => void;
   cancelOrder: (orderId: string) => void;
   saveProduct: (product: Product) => void;
+  createProduct: (input: {
+    product: Product;
+    initialStock: Array<{
+      variantId: string;
+      available: number;
+      reason: string;
+    }>;
+  }) => Promise<{ id: string; status: Product["status"] }>;
   setProductStatus: (productId: string, status: Product["status"]) => void;
   saveVendor: (vendor: Vendor) => void;
   updateCategory: (
@@ -301,6 +309,7 @@ export function DemoProvider({
       "updateOrderStatus",
       "updateVendorStage",
       "cancelOrder",
+      "createProduct",
       "saveProduct",
       "setProductStatus",
       "saveVendor",
@@ -339,6 +348,7 @@ export function DemoProvider({
       result[name] = (...args: unknown[]) => run(name, args);
     for (const name of [
       "placeOrder",
+      "createProduct",
       "submitSourcing",
       "convertQuoteToOrder",
       "createReturn",
@@ -441,7 +451,9 @@ export function DemoProvider({
       } catch (error) {
         await refresh();
         notify(
-          error instanceof Error ? error.message : "Unable to update notifications.",
+          error instanceof Error
+            ? error.message
+            : "Unable to update notifications.",
           "error",
         );
         throw error;

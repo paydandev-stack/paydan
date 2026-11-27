@@ -98,6 +98,16 @@ export function ProductCard({
           </div>
         ) : null}
         <p className="availability">{availability.label}</p>
+        {product.fulfillment ? (
+          <p className="availability">
+            Ships from {product.fulfillment.city} ·{" "}
+            {product.fulfillment.proximity === "same-city"
+              ? "Within your city"
+              : product.fulfillment.proximity === "same-state"
+                ? "Within your state"
+                : "Interstate delivery"}
+          </p>
+        ) : null}
 
         {signedIn ? (
           !showPrice ? (

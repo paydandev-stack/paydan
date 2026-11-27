@@ -21,6 +21,8 @@ type VariantRow = {
   availability: Availability;
   sku: string;
   options: string;
+  initialStock: string;
+  stockReason: string;
 };
 type ProductForm = {
   name: string;
@@ -34,6 +36,7 @@ type ProductForm = {
   costPrice: string;
   availability: Availability;
   vendorId: string;
+  fulfillmentLocationId: string;
   status: ProductStatus;
   featured: boolean;
   newArrival: boolean;
@@ -41,6 +44,8 @@ type ProductForm = {
   highlights: string;
   specifications: string;
   variants: VariantRow[];
+  initialStock: string;
+  stockReason: string;
 };
 function rowKey(): string {
   return `r-${Math.random().toString(36).slice(2, 9)}`;
@@ -128,6 +133,7 @@ const flagCopy: {
 export default function AdminNewProductPage() {
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const router = useRouter();
   const { state, actions } = useDemo();
   const [form, setForm] = useState<ProductForm>({
@@ -142,6 +148,7 @@ export default function AdminNewProductPage() {
     costPrice: "",
     availability: "in_stock",
     vendorId: state.vendors[0]?.id ?? "",
+    fulfillmentLocationId: "",
     status: "draft",
     featured: false,
     newArrival: false,
@@ -149,6 +156,8 @@ export default function AdminNewProductPage() {
     highlights: "",
     specifications: "",
     variants: [],
+    initialStock: "0",
+    stockReason: "Initial product setup",
   });
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -259,6 +268,7 @@ export default function AdminNewProductPage() {
           compareAt !== null && compareAt > price ? compareAt : undefined,
         availability: form.availability,
         vendorId: form.vendorId,
+        fulfillmentLocationId: form.fulfillmentLocationId || undefined,
         costPrice,
         variants,
         status: form.status,
@@ -272,18 +282,40 @@ export default function AdminNewProductPage() {
       };
       if (!uploadedImages.length)
         return actions.notify("Upload at least one product image.", "error");
-      await actions.saveProduct(product);
+      const initialStock = rows.length
+        ? rows.map((row, index) => ({
+            variantId: variants[index].id,
+            available: Number(row.initialStock),
+            reason: row.stockReason.trim(),
+          }))
+        : [
+            {
+              variantId: variants[0].id,
+              available: Number(form.initialStock),
+              reason: form.stockReason.trim(),
+            },
+          ];
+      if (
+        initialStock.some(
+          (stock) =>
+            !Number.isInteger(stock.available) ||
+            stock.available < 0 ||
+            stock.reason.length < 3,
+        )
+      )
+        return actions.notify(
+          "Add a whole-number initial stock and a reason for every variant.",
+          "error",
+        );
+      await actions.createProduct({ product, initialStock });
       actions.notify(
         form.status === "published"
           ? `${name} saved and live on the storefront.`
           : `${name} saved as ${productStatusMeta[form.status].label.toLowerCase()}.`,
       );
       router.push("/admin/products");
-    } catch (error) {
-      actions.notify(
-        error instanceof Error ? error.message : "Could not save product.",
-        "error",
-      );
+    } catch {
+      // The shared command runner already reports the server error once.
     } finally {
       setSaving(false);
     }
@@ -304,6 +336,7 @@ export default function AdminNewProductPage() {
       <form onSubmit={handleSubmit}>
         <MediaUpload
           images={uploadedImages}
+          onBusyChange={setUploadBusy}
           onUploaded={(url) => setUploadedImages((images) => [...images, url])}
           onRemove={(url) =>
             setUploadedImages((images) =>
@@ -362,12 +395,33 @@ export default function AdminNewProductPage() {
               <SelectField
                 label="Product vendor"
                 value={form.vendorId}
-                onChange={(value) => set("vendorId", value)}
+                onChange={(value) => {
+                  set("vendorId", value);
+                  set("fulfillmentLocationId", "");
+                }}
                 options={state.vendors.map((item) => ({
                   value: item.id,
                   label: item.name,
                 }))}
                 hint="The selected vendor name appears on the storefront product card."
+              />
+              <SelectField
+                label="Fulfilment location"
+                value={form.fulfillmentLocationId}
+                onChange={(value) => set("fulfillmentLocationId", value)}
+                options={[
+                  { value: "", label: "Vendor primary location" },
+                  ...(state.vendors
+                    .find((item) => item.id === form.vendorId)
+                    ?.fulfillmentLocations?.filter(
+                      (location) => location.active,
+                    )
+                    .map((location) => ({
+                      value: location.id,
+                      label: `${location.label} · ${location.city}, ${location.state}`,
+                    })) ?? []),
+                ]}
+                hint="Optional override for vendors with multiple warehouses."
               />
               <AdminTextField
                 label="Price (₦)"
@@ -478,12 +532,30 @@ export default function AdminNewProductPage() {
               Each row sells on its own price and stock state. Rows left empty
               produce a single “Standard” option built from the price above.
             </p>
+            {form.variants.length === 0 ? (
+              <div className="form-grid" style={{ marginBottom: "1rem" }}>
+                <AdminTextField
+                  label="Initial confirmed stock"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={form.initialStock}
+                  onChange={(event) => set("initialStock", event.target.value)}
+                />
+                <AdminTextField
+                  label="Stock reason"
+                  value={form.stockReason}
+                  onChange={(event) => set("stockReason", event.target.value)}
+                  hint="Required for the opening inventory audit."
+                />
+              </div>
+            ) : null}
             {form.variants.map((row) => (
               <div
                 key={row.key}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.2fr .8fr 1fr 1fr 1.4fr auto",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(10rem, 1fr))",
                   gap: ".6rem",
                   alignItems: "end",
                   marginBottom: ".6rem",
@@ -546,6 +618,23 @@ export default function AdminNewProductPage() {
                     setRow(row.key, { options: event.target.value })
                   }
                 />
+                <AdminTextField
+                  label="Initial stock"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={row.initialStock}
+                  onChange={(event) =>
+                    setRow(row.key, { initialStock: event.target.value })
+                  }
+                />
+                <AdminTextField
+                  label="Stock reason"
+                  value={row.stockReason}
+                  onChange={(event) =>
+                    setRow(row.key, { stockReason: event.target.value })
+                  }
+                />
                 <button
                   type="button"
                   className="admin-btn quiet"
@@ -578,6 +667,8 @@ export default function AdminNewProductPage() {
                       availability: "in_stock",
                       sku: "",
                       options: "",
+                      initialStock: "0",
+                      stockReason: "Initial product setup",
                     },
                   ],
                 }))
@@ -602,7 +693,7 @@ export default function AdminNewProductPage() {
           <button
             type="submit"
             className="admin-btn secondary"
-            disabled={saving}
+            disabled={saving || uploadBusy}
             onClick={() => set("status", "draft")}
           >
             Save draft
@@ -610,7 +701,7 @@ export default function AdminNewProductPage() {
           <button
             type="submit"
             className="admin-btn primary"
-            disabled={saving}
+            disabled={saving || uploadBusy}
             onClick={() => set("status", "published")}
           >
             Publish product

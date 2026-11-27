@@ -5,7 +5,7 @@ import { useDemo } from "@/lib/store";
 import { HomeIcon, PackageIcon, StoreIcon } from "@/components/icons";
 
 type Props = {
-  active: "overview" | "products" | "orders";
+  active: "overview" | "products" | "orders" | "settings";
   vendorName: string;
   email: string;
   children: React.ReactNode;
@@ -19,7 +19,18 @@ const links = [
     label: "My catalogue",
     icon: StoreIcon,
   },
-  { href: "/vendor/orders", key: "orders", label: "Order queue", icon: PackageIcon },
+  {
+    href: "/vendor/orders",
+    key: "orders",
+    label: "Order queue",
+    icon: PackageIcon,
+  },
+  {
+    href: "/vendor/settings",
+    key: "settings",
+    label: "Locations",
+    icon: StoreIcon,
+  },
 ] as const;
 
 export function VendorShell({ active, vendorName, email, children }: Props) {

@@ -195,6 +195,7 @@ beforeAll(async () => {
     "008_push_outbox.sql",
     "009_assistant_cart_actions.sql",
     "010_reviews_and_multi_remove.sql",
+    "011_fulfillment_and_delivery.sql",
   ])
     await harness.db.exec(await readFile(`migrations/${file}`, "utf8"));
   const migration = await getMigrations(auth().options);
@@ -215,7 +216,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await harness.db.exec(
-    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread,push_token,product_review",
+    "TRUNCATE commerce_record,catalog_sku,command_receipt,payment,webhook_event,mail_outbox,rate_bucket,media,refund,inventory,inventory_reservation,assistant_proposal,email_webhook_event,email_suppression,worker_run,notification,support_message,support_thread,push_token,product_review,vendor_fulfillment_location,delivery_band",
   );
   await put(database(), "products", product.id, product);
   await put(database(), "categories", "phones", {

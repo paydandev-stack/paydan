@@ -21,6 +21,8 @@ type VendorForm = {
   status: VendorStatus;
   paymentTerms: string;
   notes: string;
+  locationLabel: string;
+  pickupAvailable: boolean;
 };
 /** Labeled select built from the same vocabulary as AdminTextField. */
 function SelectField({
@@ -130,6 +132,8 @@ export default function AdminNewVendorPage() {
     status: "active",
     paymentTerms: "",
     notes: "",
+    locationLabel: "Primary fulfilment location",
+    pickupAvailable: false,
   });
   const [saving, setSaving] = useState(false);
   function set<K extends keyof VendorForm>(key: K, value: VendorForm[K]) {
@@ -185,6 +189,20 @@ export default function AdminNewVendorPage() {
         notes: form.notes.trim(),
         reliability: 0,
         createdAt: new Date().toISOString(),
+        fulfillmentLocations: [
+          {
+            id: `${id}-primary`,
+            vendorId: id,
+            label: form.locationLabel.trim() || "Primary fulfilment location",
+            address: form.address.trim(),
+            city,
+            state: form.state,
+            isPrimary: true,
+            active: true,
+            pickupAvailable: form.pickupAvailable,
+            dispatchLeadTimeDays: leadTimeDays,
+          },
+        ],
       };
       setSaving(true);
       await actions.saveVendor(vendor);
@@ -263,6 +281,22 @@ export default function AdminNewVendorPage() {
                 value={form.address}
                 onChange={(event) => set("address", event.target.value)}
               />
+              <AdminTextField
+                label="Fulfilment location label"
+                value={form.locationLabel}
+                onChange={(event) => set("locationLabel", event.target.value)}
+                hint="For example: Ikeja warehouse."
+              />
+              <label className="choice">
+                <input
+                  type="checkbox"
+                  checked={form.pickupAvailable}
+                  onChange={(event) =>
+                    set("pickupAvailable", event.target.checked)
+                  }
+                />
+                <span>Customer pickup available</span>
+              </label>
               <AdminTextField
                 label="Lead time (days)"
                 type="number"

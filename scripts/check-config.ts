@@ -17,16 +17,15 @@ const groups: Record<string, string[]> = {
   ],
   Email: [
     "SMTP_HOST",
-    "MAIL_FROM",
+    "MAIL_FROM_AUTH",
+    "MAIL_FROM_ORDERS",
+    "MAIL_FROM_SUPPORT",
     "MAIL_REPLY_TO",
     "OPERATIONS_NOTIFICATION_EMAIL",
     "RESEND_WEBHOOK_SECRET",
     "CRON_SECRET",
   ],
-  AI: [
-    "AI_PROVIDER_PROFILE",
-    "AI_PROVIDER_TIMEOUT_MS",
-  ],
+  AI: ["AI_PROVIDER_PROFILE", "AI_PROVIDER_TIMEOUT_MS"],
 };
 const optional: Record<string, string[]> = {
   Authentication: ["BETTER_AUTH_TRUSTED_ORIGINS"],

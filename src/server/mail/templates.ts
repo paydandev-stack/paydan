@@ -45,8 +45,7 @@ function content(key: MailTemplateKey, data: TemplateData) {
       return {
         subject: "Verify your PAYDAN email",
         heading: "Verify your email",
-        message:
-          "Confirm your email address to finish setting up your PAYDAN account.",
+        message: `${data.name ? `Hello ${data.name}. ` : ""}You received this because a PAYDAN account was created with this email address. Confirm it to finish setting up your account. This link is time-limited. PAYDAN will never ask for your password by email. If you did not create the account, you can safely ignore this message.`,
         cta: "Verify email",
         href: String(data.url),
       };
@@ -54,8 +53,7 @@ function content(key: MailTemplateKey, data: TemplateData) {
       return {
         subject: "Reset your PAYDAN password",
         heading: "Reset your password",
-        message:
-          "Use the secure link below to choose a new password. If you did not request this, you can ignore this email.",
+        message: `${data.name ? `Hello ${data.name}. ` : ""}A password reset was requested for your PAYDAN account. Use the time-limited secure link below to choose a new password. PAYDAN will never ask for your password by email. If you did not request this, ignore this message and your password will remain unchanged.`,
         cta: "Reset password",
         href: String(data.url),
       };
@@ -189,7 +187,8 @@ export function renderMail(
           )
         : value.subject;
   const subject = configuredSubject.slice(0, 240);
-  const text = `${value.heading}\n\n${value.message}\n\n${value.cta}: ${value.href}\n\nPAYDAN — One place. More possibilities.`;
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f6f4;color:#10251a;font-family:Arial,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fff;border:1px solid #dbe4dd;border-radius:14px;overflow:hidden"><tr><td style="padding:24px 30px;background:#073b25;color:#fff;font-weight:800;letter-spacing:.08em">PAYDAN</td></tr><tr><td style="padding:34px 30px"><h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:30px;font-weight:500">${escapeHtml(value.heading)}</h1><p style="margin:0 0 26px;line-height:1.65;color:#42564a">${escapeHtml(value.message)}</p><a href="${escapeHtml(value.href)}" style="display:inline-block;padding:13px 20px;background:#009b4d;color:#fff;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(value.cta)}</a></td></tr><tr><td style="padding:18px 30px;border-top:1px solid #e1e8e3;color:#6b7c70;font-size:12px">PAYDAN · One place. More possibilities.</td></tr></table></td></tr></table></body></html>`;
+  const showVisibleUrl = key === "auth.verify" || key === "auth.reset";
+  const text = `${value.heading}\n\n${value.message}\n\n${value.cta}: ${value.href}${showVisibleUrl ? `\n\nIf the button does not work, copy this address into your browser:\n${value.href}` : ""}\n\nPAYDAN — One place. More possibilities.`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f6f4;color:#10251a;font-family:Arial,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fff;border:1px solid #dbe4dd;border-radius:14px;overflow:hidden"><tr><td style="padding:24px 30px;background:#073b25;color:#fff;font-weight:800;letter-spacing:.08em">PAYDAN</td></tr><tr><td style="padding:34px 30px"><h1 style="margin:0 0 16px;font-family:Georgia,serif;font-size:30px;font-weight:500">${escapeHtml(value.heading)}</h1><p style="margin:0 0 26px;line-height:1.65;color:#42564a">${escapeHtml(value.message)}</p><a href="${escapeHtml(value.href)}" style="display:inline-block;padding:13px 20px;background:#009b4d;color:#fff;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(value.cta)}</a>${showVisibleUrl ? `<p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7c70">If the button does not work, copy this address into your browser:<br><span style="word-break:break-all">${escapeHtml(value.href)}</span></p>` : ""}</td></tr><tr><td style="padding:18px 30px;border-top:1px solid #e1e8e3;color:#6b7c70;font-size:12px">PAYDAN · One place. More possibilities.</td></tr></table></td></tr></table></body></html>`;
   return { subject, text, html };
 }

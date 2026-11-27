@@ -3,8 +3,16 @@ import "server-only";
 import nodemailer from "nodemailer";
 
 export function mailTransport() {
-  if (!process.env.SMTP_HOST || !process.env.MAIL_FROM)
-    throw new Error("Configure SMTP_HOST and MAIL_FROM.");
+  if (
+    !process.env.SMTP_HOST ||
+    !(
+      process.env.MAIL_FROM ||
+      process.env.MAIL_FROM_AUTH ||
+      process.env.MAIL_FROM_ORDERS ||
+      process.env.MAIL_FROM_SUPPORT
+    )
+  )
+    throw new Error("Configure SMTP_HOST and transactional mail senders.");
   const port = Number(process.env.SMTP_PORT || 587);
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,

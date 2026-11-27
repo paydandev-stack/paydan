@@ -64,6 +64,7 @@ export const product = z.object({
   compareAt: amount.optional(),
   availability,
   vendorId: id,
+  fulfillmentLocationId: id.optional(),
   costPrice: amount,
   variants: z
     .array(
@@ -119,6 +120,25 @@ export const vendor = z.object({
   notes: text,
   reliability: z.number().min(0).max(100),
   createdAt: text,
+  fulfillmentLocations: z
+    .array(
+      z.object({
+        id,
+        vendorId: id,
+        label: short,
+        address: text,
+        city: short,
+        state: short,
+        latitude: z.number().finite().min(-90).max(90).optional(),
+        longitude: z.number().finite().min(-180).max(180).optional(),
+        isPrimary: z.boolean(),
+        active: z.boolean(),
+        pickupAvailable: z.boolean(),
+        dispatchLeadTimeDays: z.number().int().min(0).max(365),
+      }),
+    )
+    .max(50)
+    .optional(),
 });
 export const voucher = z
   .object({

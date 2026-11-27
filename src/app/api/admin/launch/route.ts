@@ -173,7 +173,9 @@ export async function GET(request: Request) {
         label: "Transactional email configured",
         ok: Boolean(
           process.env.SMTP_HOST &&
-          process.env.MAIL_FROM &&
+          (process.env.MAIL_FROM_AUTH || process.env.MAIL_FROM) &&
+          (process.env.MAIL_FROM_ORDERS || process.env.MAIL_FROM) &&
+          (process.env.MAIL_FROM_SUPPORT || process.env.MAIL_FROM) &&
           process.env.EMAIL_ACCEPTED_AT,
         ),
         detail: process.env.EMAIL_ACCEPTED_AT || "Verify delivery and webhooks",

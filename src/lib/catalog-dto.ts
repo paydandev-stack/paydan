@@ -45,6 +45,7 @@ export type CatalogProduct = {
   categorySlug: string;
   brand: string;
   vendorName?: string;
+  fulfillment?: Product["fulfillment"];
   images: string[];
   description: string;
   highlights: string[];
@@ -89,6 +90,7 @@ const productShape = (product: Product, priced: boolean): CatalogProduct => ({
   categorySlug: product.categorySlug,
   brand: product.brand,
   ...(product.vendorName ? { vendorName: product.vendorName } : {}),
+  ...(product.fulfillment ? { fulfillment: product.fulfillment } : {}),
   images: product.images,
   description: product.description,
   highlights: product.highlights,

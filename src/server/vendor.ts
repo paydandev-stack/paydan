@@ -39,7 +39,16 @@ export type VendorOrder = {
 };
 
 export type VendorSnapshot = {
-  vendor: { id: string; name: string };
+  vendor: Pick<
+    Vendor,
+    | "id"
+    | "name"
+    | "fulfillmentLocations"
+    | "address"
+    | "city"
+    | "state"
+    | "leadTimeDays"
+  >;
   products: VendorProduct[];
   orders: VendorOrder[];
 };
@@ -84,7 +93,10 @@ export async function getVendorSnapshot(user: Viewer): Promise<VendorSnapshot> {
       product_id: string;
       variant_id: string;
       available: number;
-    }>("SELECT product_id, variant_id, available FROM inventory"),
+    }>(
+      `SELECT product_id,variant_id,sum(available)::int AS available
+       FROM inventory GROUP BY product_id,variant_id`,
+    ),
   ]);
   if (!vendor || vendor.status !== "active")
     throw new HttpError(403, "This vendor account is not active.");
@@ -141,7 +153,15 @@ export async function getVendorSnapshot(user: Viewer): Promise<VendorSnapshot> {
     .sort((a, b) => b.placedAt.localeCompare(a.placedAt));
 
   return {
-    vendor: { id: vendor.id, name: vendor.name },
+    vendor: {
+      id: vendor.id,
+      name: vendor.name,
+      fulfillmentLocations: vendor.fulfillmentLocations,
+      address: vendor.address,
+      city: vendor.city,
+      state: vendor.state,
+      leadTimeDays: vendor.leadTimeDays,
+    },
     products,
     orders,
   };

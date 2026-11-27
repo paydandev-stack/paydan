@@ -58,7 +58,10 @@ function configured(): ServiceHealth {
     },
     email: {
       status:
-        process.env.SMTP_HOST && process.env.MAIL_FROM
+        process.env.SMTP_HOST &&
+        (process.env.MAIL_FROM_AUTH || process.env.MAIL_FROM) &&
+        (process.env.MAIL_FROM_ORDERS || process.env.MAIL_FROM) &&
+        (process.env.MAIL_FROM_SUPPORT || process.env.MAIL_FROM)
           ? "configured"
           : "not_configured",
     },

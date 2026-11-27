@@ -14,7 +14,23 @@ type ClaimedMail = {
   reply_to: string | null;
   attempts: number;
   claim_token: string;
+  event_type: string | null;
+  template_key: string | null;
 };
+
+function senderFor(mail: ClaimedMail) {
+  const key = mail.template_key || mail.event_type || "";
+  if (key.startsWith("auth."))
+    return process.env.MAIL_FROM_AUTH || process.env.MAIL_FROM;
+  if (
+    key.startsWith("support.") ||
+    key.startsWith("sourcing.") ||
+    key.startsWith("team.") ||
+    key.startsWith("vendor.")
+  )
+    return process.env.MAIL_FROM_SUPPORT || process.env.MAIL_FROM;
+  return process.env.MAIL_FROM_ORDERS || process.env.MAIL_FROM;
+}
 
 async function claim(limit: number, eventKey?: string): Promise<ClaimedMail[]> {
   const token = randomUUID();
@@ -90,7 +106,7 @@ export async function processMailBatch(limit = 25, eventKey?: string) {
     }
     try {
       const info = await transport.sendMail({
-        from: process.env.MAIL_FROM,
+        from: senderFor(mail),
         to: mail.recipient,
         replyTo: mail.reply_to || process.env.MAIL_REPLY_TO || undefined,
         subject: mail.subject,

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import {
+  useEffect,
   useId,
   useRef,
   useState,
@@ -30,6 +31,7 @@ export type MediaUploadProps = {
   multiple?: boolean;
   maxFiles?: number;
   title?: string;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 function friendlyError(error: unknown) {
@@ -50,6 +52,7 @@ export function MediaUpload({
   multiple = true,
   maxFiles = 12,
   title = "Add product photos",
+  onBusyChange,
 }: MediaUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<QueueItem[]>([]);
@@ -59,6 +62,10 @@ export function MediaUpload({
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [failedPreviews, setFailedPreviews] = useState<Set<string>>(new Set());
+  const [previewRetries, setPreviewRetries] = useState<Record<string, number>>(
+    {},
+  );
 
   const activeCount =
     images.length + queue.filter((item) => item.status !== "failed").length;
@@ -67,6 +74,11 @@ export function MediaUpload({
   const busy = queue.some(
     (item) => item.status === "uploading" || item.status === "queued",
   );
+  const blocked = busy || failedPreviews.size > 0;
+
+  useEffect(() => {
+    onBusyChange?.(blocked);
+  }, [blocked, onBusyChange]);
 
   function updateQueue(next: QueueItem[]) {
     queueRef.current = next;
@@ -92,7 +104,7 @@ export function MediaUpload({
     const result = await fetch(signed.url, { method: "POST", body });
     if (!result.ok) throw new Error("The upload failed. Please retry.");
 
-    const ready = await api<{ url: string }>("/api/media", {
+    const ready = await api<{ id: string; url: string }>("/api/media", {
       action: "finalize",
       id: signed.id,
     });
@@ -277,10 +289,25 @@ export function MediaUpload({
           {images.map((url, index) => (
             <article className="media-preview" key={url}>
               <img
-                src={url}
+                src={
+                  previewRetries[url]
+                    ? `${url}${url.includes("?") ? "&" : "?"}previewRetry=${previewRetries[url]}`
+                    : url
+                }
                 alt={alts?.[url] || "Product image " + (index + 1)}
                 width={90}
                 height={90}
+                onLoad={() =>
+                  setFailedPreviews((current) => {
+                    if (!current.has(url)) return current;
+                    const next = new Set(current);
+                    next.delete(url);
+                    return next;
+                  })
+                }
+                onError={() =>
+                  setFailedPreviews((current) => new Set(current).add(url))
+                }
               />
               <div className="media-preview-body">
                 {index === 0 ? (
@@ -294,6 +321,30 @@ export function MediaUpload({
                       onChange={(event) => onAltChange(url, event.target.value)}
                     />
                   </label>
+                ) : null}
+                {failedPreviews.has(url) ? (
+                  <div className="media-error" role="alert">
+                    <span>
+                      Preview unavailable. The image is not ready to attach.
+                    </span>
+                    <button
+                      type="button"
+                      className="admin-btn secondary"
+                      onClick={() => {
+                        setFailedPreviews((current) => {
+                          const next = new Set(current);
+                          next.delete(url);
+                          return next;
+                        });
+                        setPreviewRetries((current) => ({
+                          ...current,
+                          [url]: (current[url] ?? 0) + 1,
+                        }));
+                      }}
+                    >
+                      Retry preview
+                    </button>
+                  </div>
                 ) : null}
                 <div className="media-preview-actions">
                   {onMove ? (

@@ -40,6 +40,7 @@ type ProductForm = {
   costPrice: string;
   availability: Availability;
   vendorId: string;
+  fulfillmentLocationId: string;
   status: ProductStatus;
   featured: boolean;
   newArrival: boolean;
@@ -104,6 +105,7 @@ function toForm(
     vendorId: vendors.some((item) => item.id === product.vendorId)
       ? product.vendorId
       : (vendors[0]?.id ?? ""),
+    fulfillmentLocationId: product.fulfillmentLocationId ?? "",
     status: product.status,
     featured: product.featured,
     newArrival: product.newArrival,
@@ -135,6 +137,7 @@ function blankForm(categorySlug: string, vendorId: string): ProductForm {
     costPrice: "",
     availability: "in_stock",
     vendorId,
+    fulfillmentLocationId: "",
     status: "draft",
     featured: false,
     newArrival: false,
@@ -226,6 +229,7 @@ export default function AdminEditProductPage() {
   );
   const [images, setImages] = useState<string[]>(() => product?.images ?? []);
   const [saving, setSaving] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const [imageAlts, setImageAlts] = useState<Record<string, string>>(
     () => product?.imageAlts ?? {},
   );
@@ -358,6 +362,7 @@ export default function AdminEditProductPage() {
           compareAt !== null && compareAt > price ? compareAt : undefined,
         availability: form.availability,
         vendorId: form.vendorId,
+        fulfillmentLocationId: form.fulfillmentLocationId || undefined,
         costPrice,
         variants,
         status: form.status,
@@ -370,11 +375,8 @@ export default function AdminEditProductPage() {
       setConfirmArchive(false);
       set("status", updated.status);
       router.push("/admin/products");
-    } catch (error) {
-      actions.notify(
-        error instanceof Error ? error.message : "Could not save product.",
-        "error",
-      );
+    } catch {
+      // The shared command runner already reports the server error once.
     } finally {
       setSaving(false);
     }
@@ -418,6 +420,7 @@ export default function AdminEditProductPage() {
           title="Product photos"
           maxFiles={12}
           images={images}
+          onBusyChange={setUploadBusy}
           alts={imageAlts}
           onUploaded={(url) => setImages((current) => [...current, url])}
           onRemove={(url) =>
@@ -487,12 +490,33 @@ export default function AdminEditProductPage() {
                 label="Product vendor"
                 error={formErrors.vendorId}
                 value={form.vendorId}
-                onChange={(value) => set("vendorId", value)}
+                onChange={(value) => {
+                  set("vendorId", value);
+                  set("fulfillmentLocationId", "");
+                }}
                 options={state.vendors.map((item) => ({
                   value: item.id,
                   label: item.name,
                 }))}
                 hint="The selected vendor name appears on the storefront product card."
+              />
+              <SelectField
+                label="Fulfilment location"
+                value={form.fulfillmentLocationId}
+                onChange={(value) => set("fulfillmentLocationId", value)}
+                options={[
+                  { value: "", label: "Vendor primary location" },
+                  ...(state.vendors
+                    .find((item) => item.id === form.vendorId)
+                    ?.fulfillmentLocations?.filter(
+                      (location) => location.active,
+                    )
+                    .map((location) => ({
+                      value: location.id,
+                      label: `${location.label} · ${location.city}, ${location.state}`,
+                    })) ?? []),
+                ]}
+                hint="Optional override for vendors with multiple warehouses."
               />
               <AdminTextField
                 label="Price (₦)"
@@ -629,7 +653,7 @@ export default function AdminEditProductPage() {
                 key={row.key}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.2fr .8fr 1fr 1fr 1.4fr auto",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(10rem, 1fr))",
                   gap: ".6rem",
                   alignItems: "end",
                   marginBottom: ".6rem",
@@ -845,7 +869,7 @@ export default function AdminEditProductPage() {
           <button
             type="submit"
             className="admin-btn secondary"
-            disabled={saving}
+            disabled={saving || uploadBusy}
             onClick={() => set("status", "draft")}
           >
             Save draft
@@ -853,7 +877,7 @@ export default function AdminEditProductPage() {
           <button
             type="submit"
             className="admin-btn primary"
-            disabled={saving}
+            disabled={saving || uploadBusy}
             onClick={() => set("status", "published")}
           >
             Save & publish

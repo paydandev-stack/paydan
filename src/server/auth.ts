@@ -11,6 +11,7 @@ export async function enqueueMail(
   recipient: string,
   subject: string,
   body: string,
+  name?: string,
 ) {
   const isReset = subject.toLowerCase().includes("reset");
   const url = body.match(/https?:\/\/\S+/)?.[0] || "";
@@ -23,22 +24,23 @@ export async function enqueueMail(
     eventType: isReset ? "auth.password_reset" : "auth.email_verification",
     recipient,
     template: isReset ? "auth.reset" : "auth.verify",
-    data: { url },
+    data: { url, name: name || "" },
   });
   if (queued)
     try {
       const delivery = await processMailBatch(1, eventKey);
       if (!delivery.sent)
-        console.warn("Auth email queued for retry after immediate delivery failed.", {
-          eventType: isReset
-            ? "auth.password_reset"
-            : "auth.email_verification",
-        });
+        console.warn(
+          "Auth email queued for retry after immediate delivery failed.",
+          {
+            eventType: isReset
+              ? "auth.password_reset"
+              : "auth.email_verification",
+          },
+        );
     } catch {
       console.warn("Auth email queued; immediate mail transport unavailable.", {
-        eventType: isReset
-          ? "auth.password_reset"
-          : "auth.email_verification",
+        eventType: isReset ? "auth.password_reset" : "auth.email_verification",
       });
     }
 }
@@ -65,6 +67,7 @@ export function auth() {
           user.email,
           "Reset your PAYDAN password",
           `Use this link to reset your password: ${url}`,
+          user.name,
         ),
       revokeSessionsOnPasswordReset: true,
     },
@@ -76,6 +79,7 @@ export function auth() {
           user.email,
           "Verify your PAYDAN email",
           `Confirm your email address: ${url}`,
+          user.name,
         ),
     },
     socialProviders:

@@ -28,6 +28,7 @@ export async function POST(request: Request) {
         productId: z.string().max(150),
         variantId: z.string().max(150),
         available: z.number().int().min(0).max(1000000),
+        fulfillmentLocationId: z.string().max(150),
       })
       .parse(await body(request));
     await transaction(async (db) => {
@@ -35,17 +36,28 @@ export async function POST(request: Request) {
       if (!product?.variants.some((v) => v.id === value.variantId))
         throw new HttpError(404, "Variant not found.");
       await db.query(
-        "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
-        [value.productId, value.variantId, value.available],
+        `INSERT INTO inventory(product_id,variant_id,fulfillment_location_id,available)
+         VALUES($1,$2,$3,$4)
+         ON CONFLICT(product_id,variant_id,fulfillment_location_id)
+         DO UPDATE SET available=excluded.available,updated_at=now()`,
+        [
+          value.productId,
+          value.variantId,
+          value.fulfillmentLocationId,
+          value.available,
+        ],
       );
       const { writeAudit } = await import("@/server/audit");
       await writeAudit(db, {
         actor: user!.email,
         action: "inventory.adjust",
-        record: `${value.productId}:${value.variantId}`,
+        record: `${value.productId}:${value.variantId}:${value.fulfillmentLocationId}`,
         capability: "inventory.write",
         source: "admin",
-        after: { available: value.available },
+        after: {
+          available: value.available,
+          fulfillmentLocationId: value.fulfillmentLocationId,
+        },
       });
     });
     return json({ saved: true });

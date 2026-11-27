@@ -9,7 +9,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { z } from "zod";
-import { database, records } from "./db";
+import { database, records, type Queryable } from "./db";
 import {
   HttpError,
   requireAnyCapability,
@@ -103,9 +103,8 @@ export async function finalizeUpload(user: Viewer, id: string) {
   }
   if (media.status === "ready")
     return {
-      url:
-        (media.purpose === "catalog" && catalogCdnUrl(media.object_key)) ||
-        `/api/media/${id}`,
+      id,
+      url: `/api/media/${id}`,
     };
   const { client, bucket } = config();
   const object = await client.send(
@@ -170,10 +169,43 @@ export async function finalizeUpload(user: Viewer, id: string) {
       after: { mime: "image/webp", size: image.length },
     });
   return {
-    url:
-      (media.purpose === "catalog" && catalogCdnUrl(finalKey)) ||
-      `/api/media/${id}`,
+    id,
+    url: `/api/media/${id}`,
   };
+}
+
+/**
+ * Resolve canonical catalogue-media references before a product write.
+ * Existing CDN URLs remain valid for older listings, while every new
+ * `/api/media/:id` reference is checked against the authoritative media row.
+ */
+export async function assertCatalogMedia(
+  db: Queryable,
+  user: Viewer,
+  urls: string[],
+) {
+  const ids = urls
+    .map((url) => /^\/api\/media\/([0-9a-f-]{36})$/i.exec(url)?.[1])
+    .filter((value): value is string => Boolean(value));
+  if (!ids.length) return;
+  const result = await db.query(
+    `SELECT id,owner_id,purpose,status FROM media WHERE id = ANY($1::text[])`,
+    [ids],
+  );
+  const rows = new Map(result.rows.map((row) => [row.id, row]));
+  for (const id of ids) {
+    const media = rows.get(id);
+    if (!media || media.purpose !== "catalog" || media.status !== "ready")
+      throw new HttpError(
+        400,
+        "An attached product image is not ready. Retry the upload.",
+      );
+    if (user.role === "Vendor" && media.owner_id !== user.id)
+      throw new HttpError(
+        403,
+        "A product image does not belong to this vendor account.",
+      );
+  }
 }
 export async function readMedia(id: string, user: Viewer | null) {
   const result = await database().query(

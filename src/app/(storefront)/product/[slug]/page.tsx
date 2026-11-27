@@ -207,6 +207,18 @@ export default function ProductPage() {
           <p className="pdp-note">
             <strong>{availability.label}.</strong> {availability.hint}
           </p>
+          {product.fulfillment ? (
+            <p className="pdp-note">
+              <strong>
+                Ships from {product.fulfillment.city},{" "}
+                {product.fulfillment.state}.
+              </strong>{" "}
+              Dispatches in about {product.fulfillment.dispatchLeadTimeDays} day
+              {product.fulfillment.dispatchLeadTimeDays === 1 ? "" : "s"}
+              {product.fulfillment.pickupAvailable ? " · Pickup available" : ""}
+              .
+            </p>
+          ) : null}
 
           {product.variants.length > 1 ? (
             <div className="variant">

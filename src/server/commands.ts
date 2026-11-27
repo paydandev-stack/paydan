@@ -31,9 +31,12 @@ import {
   enqueueViewerNotification,
 } from "./notifications";
 import { issueVendorInvite, revokeVendorInvites } from "./vendor-invites";
+import { assertCatalogMedia } from "./media";
+import { legacyPrimaryLocation, vendorLocations } from "@/lib/fulfillment";
 
 const commandCapabilities: Record<string, AdminCapability> = {
   saveShippingZone: "shipping.write",
+  createProduct: "catalog.write",
   saveProduct: "catalog.write",
   bulkProductStatus: "catalog.write",
   duplicateProduct: "catalog.write",
@@ -134,6 +137,48 @@ async function required<T>(
   const value = await record<T>(db, kind, s.id.parse(id), true);
   if (!value) throw new HttpError(404, "Record not found.");
   return value;
+}
+
+async function assertVendorLocationsCanChange(
+  db: Queryable,
+  vendorId: string,
+  locations: Vendor["fulfillmentLocations"],
+) {
+  const activeLocationIds = (locations ?? [])
+    .filter((location) => location.active)
+    .map((location) => location.id);
+  const [stock, reservations] = await Promise.all([
+    db.query(
+      `SELECT location.label, SUM(inventory.available)::integer AS units
+       FROM inventory
+       JOIN vendor_fulfillment_location location
+         ON location.id=inventory.fulfillment_location_id
+       WHERE location.vendor_id=$1
+         AND inventory.available>0
+         AND NOT (inventory.fulfillment_location_id=ANY($2::text[]))
+       GROUP BY location.id,location.label
+       LIMIT 1`,
+      [vendorId, activeLocationIds],
+    ),
+    db.query(
+      `SELECT location.label, COUNT(*)::integer AS reservations
+       FROM inventory_reservation reservation
+       JOIN vendor_fulfillment_location location
+         ON location.id=reservation.fulfillment_location_id
+       WHERE location.vendor_id=$1
+         AND reservation.status='reserved'
+         AND NOT (reservation.fulfillment_location_id=ANY($2::text[]))
+       GROUP BY location.id,location.label
+       LIMIT 1`,
+      [vendorId, activeLocationIds],
+    ),
+  ]);
+  const blocked = stock.rows[0] ?? reservations.rows[0];
+  if (blocked)
+    throw new HttpError(
+      409,
+      `Reassign stock and active orders from ${String(blocked.label)} before disabling or removing that fulfilment location.`,
+    );
 }
 function own(owner: string | undefined, user: Viewer) {
   if (owner !== user.id) throw new HttpError(404, "Record not found.");
@@ -776,7 +821,11 @@ async function execute(
     );
     return { reset: true };
   }
-  const vendorCommands = new Set(["saveVendorProduct", "saveVendorStock"]);
+  const vendorCommands = new Set([
+    "saveVendorProduct",
+    "saveVendorStock",
+    "saveVendorLocations",
+  ]);
   if (vendorCommands.has(name)) {
     if (user.role !== "Vendor")
       throw new HttpError(403, "Vendor portal access is required.");
@@ -800,13 +849,142 @@ async function execute(
     ).find((z) => z.state === value.state);
     if (previous) value.id = previous.id;
     await put(db, "shippingZones", value.id, value);
+  } else if (name === "createProduct") {
+    const input = z
+      .object({
+        product: s.product,
+        initialStock: z
+          .array(
+            z.object({
+              variantId: s.id,
+              available: z.number().int().min(0).max(1000000),
+              reason: z.string().trim().min(3).max(200),
+            }),
+          )
+          .min(1)
+          .max(100),
+      })
+      .parse(a);
+    const value = input.product;
+    if (await record(db, "products", value.id))
+      throw new HttpError(409, "This product already exists.");
+    await assertCatalogMedia(db, user, value.images);
+    const category = await record<{ subcategories?: Array<{ slug: string }> }>(
+      db,
+      "categories",
+      value.categorySlug,
+    );
+    const vendor = await record<Vendor>(db, "vendors", value.vendorId);
+    if (!category || !vendor)
+      throw new HttpError(400, "Select an existing category and supplier.");
+    const location =
+      vendorLocations(vendor).find(
+        (item) => item.id === value.fulfillmentLocationId && item.active,
+      ) ||
+      vendorLocations(vendor).find((item) => item.isPrimary && item.active);
+    if (!location)
+      throw new HttpError(
+        400,
+        "The supplier needs an active fulfilment location.",
+      );
+    if (
+      value.subcategorySlug &&
+      !category.subcategories?.some(
+        (item) => item.slug === value.subcategorySlug,
+      )
+    )
+      throw new HttpError(400, "Select a subcategory from this department.");
+    if (
+      new Set(value.variants.map((variant) => variant.id)).size !==
+      value.variants.length
+    )
+      throw new HttpError(400, "Variant IDs must be unique.");
+    const allSkus = [
+      value.sku.toLowerCase(),
+      ...value.variants.map((variant) => variant.sku.toLowerCase()),
+    ];
+    if (new Set(allSkus).size !== allSkus.length)
+      throw new HttpError(400, "Product and variant SKUs must be unique.");
+    const duplicate = await db.query(
+      `SELECT id FROM commerce_record
+       WHERE kind='products' AND (
+         lower(data->>'slug')=lower($1) OR
+         lower(data->>'sku')=ANY($2::text[]) OR
+         EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(COALESCE(data->'variants','[]'::jsonb)) variant
+           WHERE lower(variant->>'sku')=ANY($2::text[])
+         )
+       ) LIMIT 1`,
+      [value.slug, allSkus],
+    );
+    if (duplicate.rows.length)
+      throw new HttpError(409, "Another product already uses this URL or SKU.");
+    const stockByVariant = new Map(
+      input.initialStock.map((stock) => [stock.variantId, stock]),
+    );
+    if (
+      stockByVariant.size !== value.variants.length ||
+      value.variants.some((variant) => !stockByVariant.has(variant.id))
+    )
+      throw new HttpError(
+        400,
+        "Add initial stock and a reason for every variant.",
+      );
+    const requestedStatus = value.status;
+    const now = new Date().toISOString();
+    const draft = { ...value, status: "draft" as const, updatedAt: now };
+    await put(db, "products", value.id, draft);
+    for (const variant of value.variants) {
+      const stock = stockByVariant.get(variant.id)!;
+      await db.query(
+        `INSERT INTO inventory(product_id,variant_id,fulfillment_location_id,available)
+         VALUES($1,$2,$3,$4)
+         ON CONFLICT(product_id,variant_id,fulfillment_location_id) DO UPDATE
+         SET available=excluded.available,updated_at=now()`,
+        [value.id, variant.id, location.id, stock.available],
+      );
+      const movement = {
+        id: randomUUID(),
+        productId: value.id,
+        variantId: variant.id,
+        before: 0,
+        after: stock.available,
+        delta: stock.available,
+        reason: stock.reason,
+        actor: user.email,
+        createdAt: now,
+      };
+      await put(db, "stockMovements", movement.id, movement, user.id);
+    }
+    if (requestedStatus === "published") {
+      const readiness = await publishReadiness(db, value);
+      if (!readiness.ready)
+        throw new HttpError(409, readiness.issues.join(" "));
+      await put(db, "products", value.id, { ...value, updatedAt: now });
+    }
+    return { id: value.id, status: requestedStatus };
   } else if (name === "saveProduct") {
     const value = s.product.parse(a);
+    await assertCatalogMedia(db, user, value.images);
     if (
       !(await record(db, "categories", value.categorySlug)) ||
       !(await record(db, "vendors", value.vendorId))
     )
       throw new HttpError(400, "Select an existing category and supplier.");
+    if (value.fulfillmentLocationId) {
+      const vendor = await required<Vendor>(db, "vendors", value.vendorId);
+      if (
+        !vendorLocations(vendor).some(
+          (location) =>
+            location.id === value.fulfillmentLocationId && location.active,
+        )
+      )
+        throw new HttpError(
+          400,
+          "Select an active fulfilment location for this supplier.",
+        );
+    }
     if (value.status === "published") {
       const readiness = await publishReadiness(db, value);
       if (!readiness.ready)
@@ -1040,7 +1218,45 @@ async function execute(
     await put(db, "categories", value.slug, value);
   } else if (name === "saveVendor") {
     const value = s.vendor.parse(a);
-    await put(db, "vendors", value.id, value);
+    const locations = value.fulfillmentLocations?.length
+      ? value.fulfillmentLocations
+      : [legacyPrimaryLocation(value)];
+    if (
+      value.status === "active" &&
+      locations.filter((location) => location.active && location.isPrimary)
+        .length !== 1
+    )
+      throw new HttpError(
+        400,
+        "An active supplier needs exactly one active primary fulfilment location.",
+      );
+    const normalized = { ...value, fulfillmentLocations: locations };
+    await assertVendorLocationsCanChange(db, value.id, locations);
+    await put(db, "vendors", value.id, normalized);
+    await db.query(
+      "DELETE FROM vendor_fulfillment_location WHERE vendor_id=$1",
+      [value.id],
+    );
+    for (const location of locations)
+      await db.query(
+        `INSERT INTO vendor_fulfillment_location(
+          id,vendor_id,label,address,city,state,latitude,longitude,is_primary,active,pickup_available,dispatch_lead_time_days
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          location.id,
+          value.id,
+          location.label,
+          location.address,
+          location.city,
+          location.state,
+          location.latitude ?? null,
+          location.longitude ?? null,
+          location.isPrimary,
+          location.active,
+          location.pickupAvailable,
+          location.dispatchLeadTimeDays,
+        ],
+      );
   } else if (name === "saveVoucher") {
     const value = s.voucher.parse(a);
     await put(db, "vouchers", value.code, value);
@@ -1290,6 +1506,49 @@ async function execute(
       status: "suspended",
     });
     return { id: member.id };
+  } else if (name === "saveVendorLocations") {
+    const vendorId = requireVendor(user);
+    const locations = s.vendor.shape.fulfillmentLocations.unwrap().parse(a);
+    if (
+      locations.some((location) => location.vendorId !== vendorId) ||
+      locations.filter((location) => location.active && location.isPrimary)
+        .length !== 1
+    )
+      throw new HttpError(
+        400,
+        "Keep exactly one active primary fulfilment location for this supplier.",
+      );
+    const vendor = await required<Vendor>(db, "vendors", vendorId);
+    await assertVendorLocationsCanChange(db, vendor.id, locations);
+    await put(db, "vendors", vendor.id, {
+      ...vendor,
+      fulfillmentLocations: locations,
+    });
+    await db.query(
+      "DELETE FROM vendor_fulfillment_location WHERE vendor_id=$1",
+      [vendor.id],
+    );
+    for (const location of locations)
+      await db.query(
+        `INSERT INTO vendor_fulfillment_location(
+          id,vendor_id,label,address,city,state,latitude,longitude,is_primary,active,pickup_available,dispatch_lead_time_days
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          location.id,
+          vendor.id,
+          location.label,
+          location.address,
+          location.city,
+          location.state,
+          location.latitude ?? null,
+          location.longitude ?? null,
+          location.isPrimary,
+          location.active,
+          location.pickupAvailable,
+          location.dispatchLeadTimeDays,
+        ],
+      );
+    return { saved: locations.length };
   } else if (name === "saveVendorProduct") {
     const vendorId = requireVendor(user);
     const product = await required<Product>(
@@ -1314,6 +1573,7 @@ async function execute(
       ...patch,
       updatedAt: new Date().toISOString(),
     };
+    await assertCatalogMedia(db, user, updated.images);
     await put(db, "products", product.id, updated);
     return { id: product.id };
   } else if (name === "saveVendorStock") {
@@ -1323,6 +1583,7 @@ async function execute(
         productId: s.id,
         variantId: s.id,
         available: z.number().int().min(0).max(1000000),
+        fulfillmentLocationId: s.id.optional(),
       })
       .parse(a);
     const product = await required<Product>(db, "products", input.productId);
@@ -1330,9 +1591,20 @@ async function execute(
       throw new HttpError(404, "Product not found.");
     if (!product.variants.some((variant) => variant.id === input.variantId))
       throw new HttpError(404, "Variant not found.");
+    const vendor = await required<Vendor>(db, "vendors", vendorId);
+    const location =
+      vendorLocations(vendor).find(
+        (item) => item.id === input.fulfillmentLocationId && item.active,
+      ) ||
+      vendorLocations(vendor).find((item) => item.isPrimary && item.active);
+    if (!location)
+      throw new HttpError(400, "Add an active fulfilment location first.");
     await db.query(
-      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
-      [input.productId, input.variantId, input.available],
+      `INSERT INTO inventory(product_id,variant_id,fulfillment_location_id,available)
+       VALUES($1,$2,$3,$4)
+       ON CONFLICT(product_id,variant_id,fulfillment_location_id)
+       DO UPDATE SET available=excluded.available,updated_at=now()`,
+      [input.productId, input.variantId, location.id, input.available],
     );
     return { saved: true };
   } else if (name === "adjustStock") {
@@ -1342,19 +1614,41 @@ async function execute(
         variantId: s.id,
         available: z.number().int().min(0).max(1000000),
         reason: z.string().trim().min(3).max(200),
+        fulfillmentLocationId: s.id.optional(),
       })
       .parse(a);
     const product = await required<Product>(db, "products", input.productId);
     if (!product.variants.some((variant) => variant.id === input.variantId))
       throw new HttpError(404, "Variant not found.");
-    const prior = await db.query(
-      "SELECT available FROM inventory WHERE product_id=$1 AND variant_id=$2",
+    const vendor = await required<Vendor>(db, "vendors", product.vendorId);
+    const location =
+      vendorLocations(vendor).find(
+        (item) => item.id === input.fulfillmentLocationId && item.active,
+      ) ||
+      vendorLocations(vendor).find((item) => item.isPrimary && item.active);
+    if (!location)
+      throw new HttpError(400, "Add an active fulfilment location first.");
+    const existingStock = await db.query(
+      `SELECT fulfillment_location_id FROM inventory
+       WHERE product_id=$1 AND variant_id=$2 ORDER BY updated_at DESC`,
       [input.productId, input.variantId],
+    );
+    const stockLocationId =
+      input.fulfillmentLocationId ||
+      (existingStock.rows.length === 1
+        ? existingStock.rows[0].fulfillment_location_id
+        : location.id);
+    const prior = await db.query(
+      "SELECT available FROM inventory WHERE product_id=$1 AND variant_id=$2 AND fulfillment_location_id=$3",
+      [input.productId, input.variantId, stockLocationId],
     );
     const before = Number(prior.rows[0]?.available ?? 0);
     await db.query(
-      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3) ON CONFLICT(product_id,variant_id) DO UPDATE SET available=excluded.available,updated_at=now()",
-      [input.productId, input.variantId, input.available],
+      `INSERT INTO inventory(product_id,variant_id,fulfillment_location_id,available)
+       VALUES($1,$2,$3,$4)
+       ON CONFLICT(product_id,variant_id,fulfillment_location_id)
+       DO UPDATE SET available=excluded.available,updated_at=now()`,
+      [input.productId, input.variantId, stockLocationId, input.available],
     );
     const movement = {
       id: randomUUID(),
@@ -1365,6 +1659,7 @@ async function execute(
       delta: input.available - before,
       reason: input.reason,
       actor: user.email,
+      fulfillmentLocationId: stockLocationId,
       createdAt: new Date().toISOString(),
     };
     await put(db, "stockMovements", movement.id, movement, user.id);

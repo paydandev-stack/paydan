@@ -10,7 +10,12 @@ import { AdminTextArea, AdminTextField } from "@/components/admin/data-table";
 import { StatusPill } from "@/components/status-pill";
 import { formatDate, money, plural } from "@/lib/format";
 import { productStatusMeta, vendorStatusMeta } from "@/lib/status";
-import type { DemoState, Vendor, VendorStatus } from "@/lib/types";
+import type {
+  DemoState,
+  Vendor,
+  VendorFulfillmentLocation,
+  VendorStatus,
+} from "@/lib/types";
 import { hasCapability } from "@/lib/capabilities";
 import { getAdminRecords, putAdminRecord } from "@/lib/admin-records";
 type VendorForm = {
@@ -25,8 +30,13 @@ type VendorForm = {
   leadTimeDays: string;
   paymentTerms: string;
   notes: string;
+  locationLabel: string;
+  pickupAvailable: boolean;
 };
 function toForm(vendor: Vendor): VendorForm {
+  const primary =
+    vendor.fulfillmentLocations?.find((location) => location.isPrimary) ??
+    vendor.fulfillmentLocations?.[0];
   return {
     name: vendor.name,
     contactName: vendor.contactName,
@@ -39,6 +49,8 @@ function toForm(vendor: Vendor): VendorForm {
     leadTimeDays: String(vendor.leadTimeDays),
     paymentTerms: vendor.paymentTerms,
     notes: vendor.notes,
+    locationLabel: primary?.label ?? "Primary fulfilment location",
+    pickupAvailable: primary?.pickupAvailable ?? false,
   };
 }
 /** Labeled select built from the same vocabulary as AdminTextField. */
@@ -387,18 +399,31 @@ export default function AdminVendorDetailPage() {
           leadTimeDays: "1",
           paymentTerms: "",
           notes: "",
+          locationLabel: "Primary fulfilment location",
+          pickupAvailable: false,
         },
   );
   const [portalEmail, setPortalEmail] = useState("");
   const [linkedEmails, setLinkedEmails] = useState<Record<string, string>>({});
   const [portalBusy, setPortalBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [additionalLocations, setAdditionalLocations] = useState<
+    VendorFulfillmentLocation[]
+  >(
+    () =>
+      vendor?.fulfillmentLocations?.filter((location) => !location.isPrimary) ??
+      [],
+  );
   if (!vendor) notFound();
   function set<K extends keyof VendorForm>(key: K, value: VendorForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
   const resetForm = () => {
     setForm(toForm(vendor));
+    setAdditionalLocations(
+      vendor.fulfillmentLocations?.filter((location) => !location.isPrimary) ??
+        [],
+    );
   };
 
   async function portalCommand(name: string, args: unknown[], success: string) {
@@ -470,6 +495,24 @@ export default function AdminVendorDetailPage() {
         leadTimeDays,
         paymentTerms: form.paymentTerms.trim(),
         notes: form.notes.trim(),
+        fulfillmentLocations: [
+          {
+            id:
+              vendor.fulfillmentLocations?.find(
+                (location) => location.isPrimary,
+              )?.id ?? `${vendor.id}-primary`,
+            vendorId: vendor.id,
+            label: form.locationLabel.trim() || "Primary fulfilment location",
+            address: form.address.trim(),
+            city,
+            state: form.state,
+            isPrimary: true,
+            active: true,
+            pickupAvailable: form.pickupAvailable,
+            dispatchLeadTimeDays: leadTimeDays,
+          },
+          ...additionalLocations,
+        ],
       };
       setSaving(true);
       await actions.saveVendor(updated);
@@ -551,6 +594,22 @@ export default function AdminVendorDetailPage() {
               onChange={(event) => set("address", event.target.value)}
             />
             <AdminTextField
+              label="Primary fulfilment label"
+              value={form.locationLabel}
+              onChange={(event) => set("locationLabel", event.target.value)}
+              hint="For example: Ikeja warehouse."
+            />
+            <label className="choice">
+              <input
+                type="checkbox"
+                checked={form.pickupAvailable}
+                onChange={(event) =>
+                  set("pickupAvailable", event.target.checked)
+                }
+              />
+              <span>Customer pickup available</span>
+            </label>
+            <AdminTextField
               label="Lead time (days)"
               type="number"
               min={1}
@@ -585,6 +644,128 @@ export default function AdminVendorDetailPage() {
               onChange={(event) => set("notes", event.target.value)}
               hint="Operational notes for the procurement team."
             />
+            <div className="admin-field wide">
+              <label>Additional fulfilment locations</label>
+              {additionalLocations.map((location) => (
+                <div
+                  className="admin-card"
+                  key={location.id}
+                  style={{ marginBottom: ".75rem" }}
+                >
+                  <div className="form-grid">
+                    <AdminTextField
+                      label="Label"
+                      value={location.label}
+                      onChange={(event) =>
+                        setAdditionalLocations((current) =>
+                          current.map((item) =>
+                            item.id === location.id
+                              ? { ...item, label: event.target.value }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                    <AdminTextField
+                      label="City"
+                      value={location.city}
+                      onChange={(event) =>
+                        setAdditionalLocations((current) =>
+                          current.map((item) =>
+                            item.id === location.id
+                              ? { ...item, city: event.target.value }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                    <SelectField
+                      label="State"
+                      value={location.state}
+                      onChange={(state) =>
+                        setAdditionalLocations((current) =>
+                          current.map((item) =>
+                            item.id === location.id ? { ...item, state } : item,
+                          ),
+                        )
+                      }
+                      options={nigerianStates.map((state) => ({
+                        value: state,
+                        label: state,
+                      }))}
+                    />
+                    <AdminTextField
+                      label="Dispatch days"
+                      type="number"
+                      min={0}
+                      value={String(location.dispatchLeadTimeDays)}
+                      onChange={(event) =>
+                        setAdditionalLocations((current) =>
+                          current.map((item) =>
+                            item.id === location.id
+                              ? {
+                                  ...item,
+                                  dispatchLeadTimeDays: Number(
+                                    event.target.value,
+                                  ),
+                                }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                    <AdminTextField
+                      wide
+                      label="Warehouse address (private)"
+                      value={location.address}
+                      onChange={(event) =>
+                        setAdditionalLocations((current) =>
+                          current.map((item) =>
+                            item.id === location.id
+                              ? { ...item, address: event.target.value }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="admin-btn danger"
+                    onClick={() =>
+                      setAdditionalLocations((current) =>
+                        current.filter((item) => item.id !== location.id),
+                      )
+                    }
+                  >
+                    Remove location
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="admin-btn secondary"
+                onClick={() =>
+                  setAdditionalLocations((current) => [
+                    ...current,
+                    {
+                      id: `${vendor.id}-${crypto.randomUUID()}`,
+                      vendorId: vendor.id,
+                      label: "Additional warehouse",
+                      address: "",
+                      city: "",
+                      state: form.state,
+                      isPrimary: false,
+                      active: true,
+                      pickupAvailable: false,
+                      dispatchLeadTimeDays: Number(form.leadTimeDays) || 1,
+                    },
+                  ])
+                }
+              >
+                Add fulfilment location
+              </button>
+            </div>
           </div>
           <div className="form-actions">
             <button

@@ -38,6 +38,14 @@ export type Product = {
   vendorId: string;
   /** Customer-safe vendor display name, derived for storefront responses. */
   vendorName?: string;
+  fulfillmentLocationId?: string;
+  fulfillment?: {
+    city: string;
+    state: string;
+    proximity: "same-city" | "same-state" | "interstate";
+    dispatchLeadTimeDays: number;
+    pickupAvailable: boolean;
+  };
   /** Internal only — never rendered on customer pages. */
   costPrice: Money;
   variants: ProductVariant[];
@@ -76,6 +84,21 @@ export type Category = {
 
 export type VendorStatus = "active" | "on_hold";
 
+export type VendorFulfillmentLocation = {
+  id: string;
+  vendorId: string;
+  label: string;
+  address: string;
+  city: string;
+  state: string;
+  latitude?: number;
+  longitude?: number;
+  isPrimary: boolean;
+  active: boolean;
+  pickupAvailable: boolean;
+  dispatchLeadTimeDays: number;
+};
+
 export type Vendor = {
   id: string;
   name: string;
@@ -92,6 +115,7 @@ export type Vendor = {
   notes: string;
   reliability: number; // 0-100 internal scorecard
   ownerTeamMemberId?: string;
+  fulfillmentLocations?: VendorFulfillmentLocation[];
   createdAt: string;
 };
 
@@ -162,6 +186,10 @@ export type OrderItem = {
   quantity: number;
   vendorId: string;
   categorySlug: string;
+  fulfillmentLocationId?: string;
+  fulfillmentCity?: string;
+  fulfillmentState?: string;
+  fulfillmentDispatchLeadTimeDays?: number;
 };
 
 export type VendorSubOrder = {
@@ -177,6 +205,10 @@ export type VendorSubOrder = {
   evidenceUrls?: string[];
   stageReason?: string;
   updatedAt: string;
+  fulfillmentLocationId?: string;
+  originCity?: string;
+  originState?: string;
+  deliveryFee?: Money;
 };
 
 export type TimelineEvent = {
@@ -192,6 +224,9 @@ export type CustomerShipment = {
   status: string;
   eta: string;
   items: Omit<OrderItem, "costPrice" | "vendorId">[];
+  originCity?: string;
+  originState?: string;
+  deliveryFee?: Money;
 };
 
 export type Order = {

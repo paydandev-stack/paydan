@@ -18,17 +18,25 @@ import type { Viewer } from "./http";
 import { isTestBuyer } from "./test-buyer";
 import { notificationsFor, testNotificationsFor } from "./notifications";
 import { hasCapability, type AdminCapability } from "@/lib/capabilities";
+import { productLocation, proximityLabel } from "@/lib/fulfillment";
 
 export function customerOrder(order: Order) {
   const items = normalizedOrderItems(order);
   return {
     ...order,
     items: items.map(
-      ({ costPrice: _cost, vendorId: _vendor, ...item }) => item,
+      ({
+        costPrice: _cost,
+        vendorId: _vendor,
+        fulfillmentLocationId: _location,
+        ...item
+      }) => item,
     ),
     shipments: order.vendorGroups.map((group, index) => ({
       id: group.id,
-      label: `Delivery group ${index + 1}`,
+      label: group.originCity
+        ? `Delivery from ${group.originCity}`
+        : `Delivery group ${index + 1}`,
       status:
         group.stage === "closed"
           ? "Delivered"
@@ -38,8 +46,16 @@ export function customerOrder(order: Order) {
               ? "Dispatched"
               : "Processing",
       eta: group.eta,
+      originCity: group.originCity,
+      originState: group.originState,
+      deliveryFee: group.deliveryFee,
       items: group.items.map(
-        ({ costPrice: _cost, vendorId: _vendor, ...item }) => item,
+        ({
+          costPrice: _cost,
+          vendorId: _vendor,
+          fulfillmentLocationId: _location,
+          ...item
+        }) => item,
       ),
     })),
     vendorGroups: [],
@@ -118,12 +134,8 @@ export async function snapshot(
     state.settings = publicSettings;
   }
   if (!operations || user?.role === "Support") {
-    const vendorNames = new Map(
-      (await records<Vendor>(db, "vendors")).map((vendor) => [
-        vendor.id,
-        vendor.name,
-      ]),
-    );
+    const vendors = await records<Vendor>(db, "vendors");
+    const vendorsById = new Map(vendors.map((vendor) => [vendor.id, vendor]));
     const categoryBySlug = new Map(
       state.categories.map((category) => [category.slug, category]),
     );
@@ -135,12 +147,23 @@ export async function snapshot(
           categoryBySlug.get(product.categorySlug),
         ),
       )
-      .map((product) =>
-        (user ? toMemberProduct : toPublicProduct)({
+      .map((product) => {
+        const vendor = vendorsById.get(product.vendorId);
+        const location = vendor ? productLocation(product, vendor) : undefined;
+        return (user ? toMemberProduct : toPublicProduct)({
           ...product,
-          vendorName: vendorNames.get(product.vendorId),
-        }),
-      ) as unknown as Product[];
+          vendorName: vendor?.name,
+          fulfillment: location
+            ? {
+                city: location.city,
+                state: location.state,
+                proximity: proximityLabel(location, state.location),
+                dispatchLeadTimeDays: location.dispatchLeadTimeDays,
+                pickupAvailable: location.pickupAvailable,
+              }
+            : undefined,
+        });
+      }) as unknown as Product[];
     state.banners = state.banners.filter(
       (b) =>
         b.active &&

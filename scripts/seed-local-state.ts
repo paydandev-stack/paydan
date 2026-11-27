@@ -19,7 +19,13 @@ async function main() {
       };
       for (const variant of product.variants ?? [])
         await db.query(
-          "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,25) ON CONFLICT(product_id,variant_id) DO NOTHING",
+          `INSERT INTO inventory(product_id,variant_id,fulfillment_location_id,available)
+           VALUES(
+             $1,$2,
+             COALESCE((SELECT data->>'vendorId' || '-primary' FROM commerce_record WHERE kind='products' AND id=$1),'legacy-primary'),
+             25
+           )
+           ON CONFLICT(product_id,variant_id,fulfillment_location_id) DO NOTHING`,
           [product.id, variant.id],
         );
     }
