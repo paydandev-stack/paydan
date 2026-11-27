@@ -723,6 +723,9 @@
   display: none;
 }
 
+.footer-links-mobile {
+  display: none;
+}
 .footer-links summary {
   margin: 1rem 0 1.2rem;
   color: var(--orange);
@@ -1051,7 +1054,14 @@
     grid-template-columns: 1fr;
     gap: 0;
   }
-  .footer-links {
+  .footer-brand {
+    padding-bottom: 2rem;
+  }
+  .footer-links-desktop {
+    display: none;
+  }
+  .footer-links-mobile {
+    display: block;
     border-top: 1px solid #294034;
   }
   .footer-links summary {

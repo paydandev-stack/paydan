@@ -70,7 +70,11 @@ import { viewer, requireRole, sameOrigin } from "../src/server/http";
 import { refundReturn, verifyRefund } from "../src/server/refunds";
 import { readMedia, beginUpload, finalizeUpload } from "../src/server/media";
 import { catalogCdnUrl, isCatalogCdnUrl } from "../src/server/media-delivery";
-import { chat, confirmAssistantProposal } from "../src/server/assistant";
+import {
+  chat,
+  chatResponse,
+  confirmAssistantProposal,
+} from "../src/server/assistant";
 import {
   cancelCartProposal,
   createCartProposal,
@@ -810,6 +814,69 @@ describe("authentication and assistant", () => {
     expect(result.text).not.toContain("supplier-secret");
     expect("cartProposal" in result).toBe(false);
   });
+  it("answers department stock questions from confirmed inventory", async () => {
+    const food = {
+      ...product,
+      id: "food-1",
+      slug: "food-one",
+      sku: "FOOD-1",
+      name: "Jollof rice",
+      categorySlug: "food-and-eatery",
+      variants: [
+        {
+          ...product.variants[0],
+          id: "food-v1",
+          sku: "FOOD-1-V1",
+        },
+      ],
+    };
+    await put(database(), "categories", "food-and-eatery", {
+      slug: "food-and-eatery",
+      name: "Food & Eatery",
+      title: "Food & Eatery",
+      description: "Prepared meals",
+      image: "/favicon.svg",
+      order: 2,
+      active: true,
+      restricted: false,
+      subcategories: [],
+      facets: [],
+    });
+    await put(database(), "products", food.id, food);
+    await database().query(
+      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3)",
+      [food.id, food.variants[0].id, 8],
+    );
+
+    const departments = await chat(null, {
+      messages: [{ role: "user", text: "what departments have stock?" }],
+    });
+    expect(departments.text).toContain("Phones");
+    expect(departments.text).toContain("Food & Eatery");
+
+    const correction = await chat(null, {
+      messages: [
+        {
+          role: "user",
+          text: "you have products listed in food and eatery department",
+        },
+      ],
+    });
+    expect(correction.text).toContain("Food & Eatery");
+    expect(correction.productIds).toContain(food.id);
+
+    const streamed = await chatResponse(null, {
+      messages: [
+        {
+          role: "user",
+          text: "you have products listed in food and eatery department",
+        },
+      ],
+    });
+    const streamedText = await streamed.text();
+    expect(streamedText).toContain("Food & Eatery");
+    expect(streamedText).toContain(food.id);
+  });
   it("rejects direct test providers in production", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AI_PROVIDER_PROFILE", "test-last");
@@ -903,6 +970,133 @@ describe("authentication and assistant", () => {
     expect((await snapshot(alice)).cart).toHaveLength(2);
     await confirmAssistantProposal(alice, { proposalId: proposal.proposalId });
     expect((await snapshot(alice)).cart).toEqual([]);
+  });
+});
+
+describe("catalog editing persistence", () => {
+  it("persists product and department names across fresh snapshots", async () => {
+    await command(
+      admin,
+      "saveProduct",
+      [
+        {
+          ...product,
+          name: "Renamed phone",
+          seoTitle: "Renamed phone from PAYDAN",
+          seoDescription: "The updated search description.",
+        },
+      ],
+      "rename-product",
+    );
+    await command(
+      admin,
+      "updateCategory",
+      ["phones", { name: "Phones & Devices", title: "Phones & Devices" }],
+      "rename-department",
+    );
+
+    expect(await record(database(), "products", product.id)).toMatchObject({
+      name: "Renamed phone",
+      seoTitle: "Renamed phone from PAYDAN",
+      seoDescription: "The updated search description.",
+    });
+    expect(await record(database(), "categories", "phones")).toMatchObject({
+      name: "Phones & Devices",
+      title: "Phones & Devices",
+    });
+
+    const freshAdmin = await snapshot(admin, true);
+    expect(freshAdmin.products.find((item) => item.id === product.id)?.name).toBe(
+      "Renamed phone",
+    );
+    expect(freshAdmin.categories.find((item) => item.slug === "phones")?.name).toBe(
+      "Phones & Devices",
+    );
+
+    const freshStorefront = await snapshot(null);
+    expect(
+      freshStorefront.products.find((item) => item.id === product.id)?.name,
+    ).toBe("Renamed phone");
+    expect(
+      freshStorefront.categories.find((item) => item.slug === "phones")?.name,
+    ).toBe("Phones & Devices");
+  });
+});
+
+describe("product deletion safeguards", () => {
+  function deletableProduct(id: string): Product {
+    return {
+      ...product,
+      id,
+      slug: id,
+      sku: id.toUpperCase(),
+      status: "draft",
+      variants: [
+        {
+          ...product.variants[0],
+          id: `${id}-variant`,
+          sku: `${id.toUpperCase()}-V1`,
+        },
+      ],
+    };
+  }
+
+  it("deletes an unreferenced draft and clears live shopper selections", async () => {
+    const draft = deletableProduct("delete-me");
+    await put(database(), "products", draft.id, draft);
+    await put(
+      database(),
+      "accounts",
+      alice.id,
+      {
+        cart: [
+          {
+            productId: draft.id,
+            variantId: draft.variants[0].id,
+            quantity: 1,
+          },
+        ],
+        wishlist: [draft.id],
+        savedForLater: [],
+        recentlyViewed: [draft.id],
+      },
+      alice.id,
+    );
+    await database().query(
+      "INSERT INTO inventory(product_id,variant_id,available) VALUES($1,$2,$3)",
+      [draft.id, draft.variants[0].id, 2],
+    );
+
+    await command(admin, "deleteProduct", [draft.id], "delete-draft");
+
+    expect(await record(database(), "products", draft.id)).toBeUndefined();
+    expect(
+      (await database().query("SELECT * FROM inventory WHERE product_id=$1", [
+        draft.id,
+      ])).rows,
+    ).toHaveLength(0);
+    expect(await record<Record<string, unknown>>(database(), "accounts", alice.id))
+      .toMatchObject({ cart: [], wishlist: [], recentlyViewed: [] });
+  });
+
+  it("requires a live product to be withdrawn before deletion", async () => {
+    await expect(
+      command(admin, "deleteProduct", [product.id], "delete-live"),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("preserves products referenced by order history", async () => {
+    const draft = deletableProduct("ordered-draft");
+    await put(database(), "products", draft.id, draft);
+    await put(database(), "orders", "historic-order", {
+      id: "historic-order",
+      items: [{ productId: draft.id, variantId: draft.variants[0].id }],
+    });
+
+    await expect(
+      command(admin, "deleteProduct", [draft.id], "delete-ordered"),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await record(database(), "products", draft.id)).toBeTruthy();
   });
 });
 

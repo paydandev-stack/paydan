@@ -22,6 +22,34 @@ const companyLinks = [
   { href: "/policies/terms", label: "Terms of use" },
 ];
 
+function FooterColumn({
+  title,
+  links,
+}: {
+  title: string;
+  links: Array<{ href: string; label: string }>;
+}) {
+  const items = links.map((link) => (
+    <Link key={link.href} href={link.href}>
+      {link.label}
+    </Link>
+  ));
+  return (
+    <>
+      <nav className="footer-links footer-links-desktop" aria-label={title}>
+        <h3>{title}</h3>
+        <div>{items}</div>
+      </nav>
+      <details className="footer-links footer-links-mobile">
+        <summary>
+          {title} <span aria-hidden="true">+</span>
+        </summary>
+        <div>{items}</div>
+      </details>
+    </>
+  );
+}
+
 export function SiteFooter() {
   const { state } = useDemo();
 
@@ -34,65 +62,43 @@ export function SiteFooter() {
     <footer className="site-footer">
       <div className="wrap footer-grid">
         <div className="footer-brand">
-          <img
-            src="/paydan-logo.png"
-            alt={state.settings.storeName}
-            width={3000}
-            height={3223}
-          />
-          <p>One storefront. A whole network behind it.</p>
-          <h3>Talk to us</h3>
-          {state.settings.supportEmail && (
-            <a href={`mailto:${state.settings.supportEmail}`}>
-              {state.settings.supportEmail}
-            </a>
-          )}
-          {state.settings.supportPhone && (
-            <a href={`tel:${state.settings.supportPhone.replaceAll(" ", "")}`}>
-              {state.settings.supportPhone}
-            </a>
-          )}
-          <a href="/contact">{state.settings.businessHours}</a>
+          <div className="footer-brand-lockup">
+            <img
+              src="/paydan-logo.png"
+              alt={state.settings.storeName}
+              width={300}
+              height={322}
+            />
+            <p>One storefront. A whole network behind it.</p>
+          </div>
+          <div className="footer-contact">
+            <Link className="footer-contact-heading" href="/contact">
+              <span>Talk to us</span>
+              <span aria-hidden="true">→</span>
+            </Link>
+            {state.settings.supportEmail && (
+              <a href={`mailto:${state.settings.supportEmail}`}>
+                {state.settings.supportEmail}
+              </a>
+            )}
+            {state.settings.supportPhone && (
+              <a href={`tel:${state.settings.supportPhone.replaceAll(" ", "")}`}>
+                {state.settings.supportPhone}
+              </a>
+            )}
+            <p className="footer-hours">{state.settings.businessHours}</p>
+          </div>
         </div>
 
-        <details className="footer-links">
-          <summary>
-            Departments <span aria-hidden="true">+</span>
-          </summary>
-          <div>
-            {departments.map((department) => (
-              <Link key={department.slug} href={`/category/${department.slug}`}>
-                {department.name}
-              </Link>
-            ))}
-          </div>
-        </details>
-
-        <details className="footer-links">
-          <summary>
-            Customer care <span aria-hidden="true">+</span>
-          </summary>
-          <div>
-            {careLinks.map((link) => (
-              <Link key={link.href} href={link.href}>
-                {link.label}
-              </Link>
-            ))}
-          </div>
-        </details>
-
-        <details className="footer-links">
-          <summary>
-            {state.settings.storeName} <span aria-hidden="true">+</span>
-          </summary>
-          <div>
-            {companyLinks.map((link) => (
-              <Link key={link.href} href={link.href}>
-                {link.label}
-              </Link>
-            ))}
-          </div>
-        </details>
+        <FooterColumn
+          title="Departments"
+          links={departments.map((department) => ({
+            href: `/category/${department.slug}`,
+            label: department.name,
+          }))}
+        />
+        <FooterColumn title="Customer care" links={careLinks} />
+        <FooterColumn title={state.settings.storeName} links={companyLinks} />
       </div>
 
       <div className="wrap footer-bottom">

@@ -234,6 +234,9 @@ export default function AdminEditProductPage() {
     () => product?.imageAlts ?? {},
   );
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteName, setDeleteName] = useState("");
+  const [deleting, setDeleting] = useState(false);
   if (!product) notFound();
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -352,6 +355,8 @@ export default function AdminEditProductPage() {
         subcategorySlug: form.subcategorySlug || undefined,
         brand,
         description: form.description.trim(),
+        seoTitle: form.seoTitle.trim() || undefined,
+        seoDescription: form.seoDescription.trim() || undefined,
         highlights: form.highlights
           .split("\n")
           .map((line) => line.trim())
@@ -847,6 +852,69 @@ export default function AdminEditProductPage() {
                 </button>
               </div>
             )}
+
+            <div className="admin-danger-zone">
+              <h3>Delete product</h3>
+              <p>
+                Permanent deletion is available only for draft or archived
+                products that are not part of an order, review, reservation or
+                promotion.
+              </p>
+              {confirmDelete ? (
+                <div className="admin-note">
+                  <AdminTextField
+                    label={`Type “${product.name}” to confirm`}
+                    value={deleteName}
+                    autoComplete="off"
+                    onChange={(event) => setDeleteName(event.target.value)}
+                  />
+                  <div className="admin-actions" style={{ marginTop: ".7rem" }}>
+                    <button
+                      type="button"
+                      className="admin-btn danger"
+                      disabled={deleting || deleteName !== product.name}
+                      onClick={async () => {
+                        setDeleting(true);
+                        try {
+                          await actions.deleteProduct(product.id);
+                          actions.notify(`${product.name} deleted.`);
+                          router.replace("/admin/products");
+                        } catch (error) {
+                          setDeleting(false);
+                        }
+                      }}
+                    >
+                      {deleting ? "Deleting…" : "Delete permanently"}
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-btn quiet"
+                      disabled={deleting}
+                      onClick={() => {
+                        setConfirmDelete(false);
+                        setDeleteName("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="admin-btn danger"
+                  disabled={!new Set(["draft", "archived"]).has(product.status)}
+                  title={
+                    new Set(["draft", "archived"]).has(product.status)
+                      ? "Permanently delete this product"
+                      : "Move this product to draft or archive it first"
+                  }
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  Delete product
+                </button>
+              )}
+            </div>
           </section>
         </div>
 

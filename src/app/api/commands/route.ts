@@ -1,5 +1,5 @@
 ﻿import { z } from "zod";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { command } from "@/server/commands";
 import { PUBLIC_CATALOG_CACHE_TAG } from "@/server/public-catalog";
 import {
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     if (
       new Set([
         "saveProduct",
+        "deleteProduct",
         "setProductStatus",
         "saveCategory",
         "updateCategory",
@@ -37,8 +38,13 @@ export async function POST(request: Request) {
         "saveVendorProduct",
         "saveVendorStock",
       ]).has(input.name)
-    )
+    ) {
       revalidateTag(PUBLIC_CATALOG_CACHE_TAG, { expire: 0 });
+      // Product and department names also appear in layouts, navigation,
+      // metadata and cached storefront pages. Purge those rendered snapshots
+      // with the data tag so an admin edit is visible on the next request.
+      revalidatePath("/", "layout");
+    }
     return json({ result });
   } catch (error) {
     return failure(error);

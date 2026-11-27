@@ -90,6 +90,7 @@ type Actions = {
   ) => void;
   cancelOrder: (orderId: string) => void;
   saveProduct: (product: Product) => void;
+  deleteProduct: (productId: string) => Promise<{ id: string; deleted: true }>;
   createProduct: (input: {
     product: Product;
     initialStock: Array<{
@@ -311,6 +312,7 @@ export function DemoProvider({
       "cancelOrder",
       "createProduct",
       "saveProduct",
+      "deleteProduct",
       "setProductStatus",
       "saveVendor",
       "updateCategory",
@@ -349,6 +351,7 @@ export function DemoProvider({
     for (const name of [
       "placeOrder",
       "createProduct",
+      "deleteProduct",
       "submitSourcing",
       "convertQuoteToOrder",
       "createReturn",

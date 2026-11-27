@@ -38,6 +38,7 @@ const commandCapabilities: Record<string, AdminCapability> = {
   saveShippingZone: "shipping.write",
   createProduct: "catalog.write",
   saveProduct: "catalog.write",
+  deleteProduct: "catalog.write",
   bulkProductStatus: "catalog.write",
   duplicateProduct: "catalog.write",
   bulkReassignProducts: "catalog.write",
@@ -1037,6 +1038,108 @@ async function execute(
       ...value,
       updatedAt: new Date().toISOString(),
     });
+  } else if (name === "deleteProduct") {
+    const id = s.id.parse(a);
+    const product = await required<Product>(db, "products", id);
+    if (!new Set(["draft", "archived"]).has(product.status))
+      throw new HttpError(
+        409,
+        "Move this product to draft or archive it before permanently deleting it.",
+      );
+    const [orderReference, reviewReference, reservation, promotionReference] =
+      await Promise.all([
+        db.query(
+          `SELECT id FROM commerce_record
+           WHERE kind IN ('orders','testOrders')
+             AND EXISTS (
+               SELECT 1
+               FROM jsonb_array_elements(COALESCE(data->'items','[]'::jsonb)) item
+               WHERE item->>'productId'=$1
+             )
+           LIMIT 1`,
+          [id],
+        ),
+        db.query("SELECT id FROM product_review WHERE product_id=$1 LIMIT 1", [
+          id,
+        ]),
+        db.query(
+          "SELECT order_id FROM inventory_reservation WHERE product_id=$1 LIMIT 1",
+          [id],
+        ),
+        db.query(
+          `SELECT id FROM commerce_record
+           WHERE kind='vouchers' AND COALESCE(data->'productIds','[]'::jsonb) ? $1
+           LIMIT 1`,
+          [id],
+        ),
+      ]);
+    if (orderReference.rows.length || reviewReference.rows.length)
+      throw new HttpError(
+        409,
+        "This product belongs to order or review history and cannot be deleted. Archive it instead.",
+      );
+    if (reservation.rows.length)
+      throw new HttpError(
+        409,
+        "This product still has an inventory reservation and cannot be deleted.",
+      );
+    if (promotionReference.rows.length)
+      throw new HttpError(
+        409,
+        "Remove this product from its promotion before deleting it.",
+      );
+
+    const accounts = await db.query(
+      "SELECT id,owner_id,data FROM commerce_record WHERE kind='accounts'",
+    );
+    for (const row of accounts.rows) {
+      const account = row.data as Record<string, unknown>;
+      const removeProduct = (value: unknown) =>
+        Array.isArray(value)
+          ? value.filter(
+              (item) =>
+                item !== id &&
+                (!item ||
+                  typeof item !== "object" ||
+                  (item as { productId?: unknown }).productId !== id),
+            )
+          : value;
+      const next = {
+        ...account,
+        cart: removeProduct(account.cart),
+        wishlist: removeProduct(account.wishlist),
+        savedForLater: removeProduct(account.savedForLater),
+        recentlyViewed: removeProduct(account.recentlyViewed),
+      };
+      if (JSON.stringify(next) !== JSON.stringify(account))
+        await put(db, "accounts", String(row.id), next, row.owner_id ?? row.id);
+    }
+
+    await db.query(
+      `UPDATE assistant_proposal SET status='cancelled'
+       WHERE status='pending' AND (
+         payload->>'productId'=$1 OR
+         EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(COALESCE(payload->'selected','[]'::jsonb)) selected
+           WHERE selected->>'productId'=$1
+         )
+       )`,
+      [id],
+    );
+    await db.query("DELETE FROM inventory WHERE product_id=$1", [id]);
+    await db.query(
+      "DELETE FROM commerce_record WHERE kind='stockMovements' AND data->>'productId'=$1",
+      [id],
+    );
+    await db.query(
+      "DELETE FROM commerce_record WHERE kind='productMeta' AND (id=$1 OR data->>'productId'=$2)",
+      [`schedule:${id}`, id],
+    );
+    await db.query("DELETE FROM commerce_record WHERE kind='products' AND id=$1", [
+      id,
+    ]);
+    return { id, deleted: true };
   } else if (name === "bulkProductStatus") {
     const input = z
       .object({

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useDemo } from "@/lib/store";
 import { AdminPageHeader } from "@/components/admin/page-header";
 import {
@@ -46,10 +46,15 @@ export default function AdminCategoriesPage() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draggedSlug, setDraggedSlug] = useState<string | null>(null);
+  const editorRef = useRef<HTMLElement>(null);
   const categories = [...state.categories].sort((a, b) => a.order - b.order);
   function openEditor(category: Category) {
     setSelectedSlug(category.slug);
     setDraft(toDraft(category));
+    if (window.matchMedia("(max-width: 1200px)").matches)
+      requestAnimationFrame(() =>
+        editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
   }
   function closeEditor() {
     setSelectedSlug(null);
@@ -57,6 +62,19 @@ export default function AdminCategoriesPage() {
   }
   function setDraftField<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+  function setDepartmentName(name: string) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            name,
+            // Keep the public shelf title aligned while it is still using the
+            // old name. A deliberately customized title remains untouched.
+            title: current.title === current.name ? name : current.title,
+          }
+        : current,
+    );
   }
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     try {
@@ -135,17 +153,19 @@ export default function AdminCategoriesPage() {
   };
   return (
     <>
-      <Link className="admin-btn" href="/admin/categories/new">
-        Create department
-      </Link>
       <AdminPageHeader
         eyebrow="Catalogue"
         title="Categories"
         description={`${plural(state.categories.length, "department")} in the navigation · select one to edit its copy, order and filters`}
+        action={
+          <Link className="admin-btn" href="/admin/categories/new">
+            Create department
+          </Link>
+        }
       />
 
-      <div className="admin-detail">
-        <section className="admin-card">
+      <div className="admin-detail category-admin-detail">
+        <section className="admin-card category-table-card">
           <h2>Departments</h2>
           {categories.length === 0 ? (
             <AdminEmpty
@@ -248,7 +268,7 @@ export default function AdminCategoriesPage() {
           )}
         </section>
 
-        <aside className="admin-card">
+        <aside ref={editorRef} className="admin-card category-editor-card">
           <h3>Edit department</h3>
           {selected && draft ? (
             <form
@@ -258,7 +278,8 @@ export default function AdminCategoriesPage() {
               <AdminTextField
                 label="Name"
                 value={draft.name}
-                onChange={(event) => setDraftField("name", event.target.value)}
+                onChange={(event) => setDepartmentName(event.target.value)}
+                hint="The shelf title follows this name until you customize it separately."
               />
               <AdminTextField
                 label="Shelf title"

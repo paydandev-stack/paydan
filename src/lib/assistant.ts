@@ -369,7 +369,14 @@ function matchCategory(
   query: string,
   categories: Category[],
 ): Category | undefined {
-  const q = query.toLowerCase();
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ");
+  const q = normalize(query);
   return categories.find((category) => {
     const names = [
       category.name,
@@ -377,10 +384,9 @@ function matchCategory(
       category.slug,
       ...category.subcategories.map((sub) => sub.name),
     ];
-    return names.some(
-      (name) =>
-        name.toLowerCase().includes(q) || q.includes(name.toLowerCase()),
-    );
+    return names
+      .map(normalize)
+      .some((name) => name === q || (name.length > 1 && q.includes(name)));
   });
 }
 

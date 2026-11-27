@@ -152,6 +152,24 @@
   cursor: not-allowed;
 }
 
+.admin-danger-zone {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #eccac5;
+}
+.admin-danger-zone h3 {
+  margin: 0 0 0.35rem;
+  color: #8c2f27;
+  font-size: 0.9rem;
+}
+.admin-danger-zone > p {
+  max-width: 42rem;
+  margin: 0 0 0.85rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
 .admin-review-list {
   display: flex;
   flex-direction: column;
@@ -1150,10 +1168,27 @@
 }
 .admin-table .table-head,
 .admin-table .table-row {
+  grid-template-columns: var(--cols);
   min-height: 3rem;
   align-items: center;
   font-size: 0.8125rem;
 }
 .admin-table .table-row:hover {
   background: #f8fbf8;
+}
+
+/* Categories keep their five-column table readable beside the edit panel. */
+@media (max-width: 1200px) {
+  .category-admin-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .category-table-card {
+    overflow-x: auto;
+  }
+  .category-table-card .admin-table {
+    min-width: 46rem;
+  }
+  .category-editor-card {
+    scroll-margin-top: 1rem;
+  }
 }

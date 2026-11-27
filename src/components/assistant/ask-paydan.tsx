@@ -28,6 +28,9 @@ import {
 import { money } from "@/lib/format";
 import {
   clampLauncherPosition,
+  launcherAnchorToPosition,
+  launcherPositionToAnchor,
+  type LauncherAnchor,
   type LauncherPosition,
 } from "@/lib/launcher-position";
 type CartProposalAction =
@@ -55,7 +58,8 @@ type Message = {
 // Proposal payloads changed in v3 (remove, quantity and clear actions). Do not
 // revive incompatible add-only proposal state from an older browser session.
 const key = "paydan-chat-v3";
-const launcherPositionKey = "paydan-assistant-launcher-position-v1";
+const launcherAnchorKey = "paydan-assistant-launcher-anchor-v2";
+const legacyLauncherPositionKey = "paydan-assistant-launcher-position-v1";
 export function AskPaydan() {
   const { state, hydrated, refresh } = useDemo();
   const owner = state.customerSession?.id ?? "guest";
@@ -78,6 +82,7 @@ export function AskPaydan() {
   const log = useRef<HTMLDivElement>(null);
   const currentOwner = useRef(owner);
   const launcherPositionRef = useRef<LauncherPosition | null>(null);
+  const launcherAnchorRef = useRef<LauncherAnchor | null>(null);
   const launcherDrag = useRef<{
     pointerId: number;
     startX: number;
@@ -106,34 +111,64 @@ export function AskPaydan() {
     setLoaded(true);
   }, [hydrated, owner]);
   useEffect(() => {
+    const element = launcher.current;
+    if (!element) return;
+    const viewport = () => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
     try {
-      const saved = JSON.parse(
-        localStorage.getItem(launcherPositionKey) || "null",
-      ) as Partial<LauncherPosition> | null;
-      if (Number.isFinite(saved?.left) && Number.isFinite(saved?.top)) {
-        const position = { left: Number(saved?.left), top: Number(saved?.top) };
+      const savedAnchor = JSON.parse(
+        localStorage.getItem(launcherAnchorKey) || "null",
+      ) as Partial<LauncherAnchor> | null;
+      let anchor: LauncherAnchor | null = null;
+      if (Number.isFinite(savedAnchor?.x) && Number.isFinite(savedAnchor?.y)) {
+        anchor = { x: Number(savedAnchor?.x), y: Number(savedAnchor?.y) };
+      } else {
+        const legacy = JSON.parse(
+          localStorage.getItem(legacyLauncherPositionKey) || "null",
+        ) as Partial<LauncherPosition> | null;
+        if (Number.isFinite(legacy?.left) && Number.isFinite(legacy?.top)) {
+          anchor = launcherPositionToAnchor(
+            { left: Number(legacy?.left), top: Number(legacy?.top) },
+            element.getBoundingClientRect(),
+            viewport(),
+          );
+          localStorage.setItem(launcherAnchorKey, JSON.stringify(anchor));
+          localStorage.removeItem(legacyLauncherPositionKey);
+        }
+      }
+      if (anchor) {
+        launcherAnchorRef.current = anchor;
+        const position = launcherAnchorToPosition(
+          anchor,
+          element.getBoundingClientRect(),
+          viewport(),
+        );
         launcherPositionRef.current = position;
         setLauncherPosition(position);
       }
     } catch {}
-    const keepInView = () => {
-      const element = launcher.current;
-      const position = launcherPositionRef.current;
-      if (!element || !position) return;
-      const bounded = clampLauncherPosition(
-        position,
-        element.getBoundingClientRect(),
-        { width: window.innerWidth, height: window.innerHeight },
+    const restoreRelativePosition = () => {
+      const current = launcher.current;
+      const anchor = launcherAnchorRef.current;
+      if (!current || !anchor) return;
+      const position = launcherAnchorToPosition(
+        anchor,
+        current.getBoundingClientRect(),
+        viewport(),
       );
-      launcherPositionRef.current = bounded;
-      setLauncherPosition(bounded);
-      try {
-        localStorage.setItem(launcherPositionKey, JSON.stringify(bounded));
-      } catch {}
+      launcherPositionRef.current = position;
+      setLauncherPosition(position);
     };
-    window.addEventListener("resize", keepInView);
-    return () => window.removeEventListener("resize", keepInView);
-  }, []);
+    const observer = new ResizeObserver(restoreRelativePosition);
+    observer.observe(element);
+    window.addEventListener("resize", restoreRelativePosition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", restoreRelativePosition);
+    };
+  }, [view]);
   useEffect(() => {
     if (loaded && thread.owner === owner)
       try {
@@ -504,7 +539,14 @@ export function AskPaydan() {
     setLauncherPosition(bounded);
     if (persist)
       try {
-        localStorage.setItem(launcherPositionKey, JSON.stringify(bounded));
+        const anchor = launcherPositionToAnchor(
+          bounded,
+          element.getBoundingClientRect(),
+          { width: window.innerWidth, height: window.innerHeight },
+        );
+        launcherAnchorRef.current = anchor;
+        localStorage.setItem(launcherAnchorKey, JSON.stringify(anchor));
+        localStorage.removeItem(legacyLauncherPositionKey);
       } catch {}
   }
   function beginLauncherDrag(event: ReactPointerEvent<HTMLButtonElement>) {

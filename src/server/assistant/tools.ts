@@ -7,6 +7,11 @@ import { database } from "../db";
 import type { Viewer } from "../http";
 import { snapshot } from "../snapshot";
 import { cartProposalInput, createCartProposal } from "./proposals";
+import {
+  confirmedAvailableProducts,
+  departmentsWithConfirmedStock,
+  resolveDepartment,
+} from "./catalog";
 
 export type AssistantToolDefinition = {
   description: string;
@@ -91,7 +96,44 @@ export async function assistantTools(user: Viewer | null) {
   const published = state.products.filter(
     (product) => product.status === "published" && !product.restricted,
   );
+  let availableProducts: Promise<Product[]> | undefined;
+  const available = () =>
+    (availableProducts ??= confirmedAvailableProducts(published, user));
   return {
+    listDepartmentsWithStock: assistantTool({
+      description:
+        "List PAYDAN departments that currently have confirmed available inventory. Use this for questions about which departments or categories have stock.",
+      inputSchema: z.object({}),
+      execute: async () => ({
+        kind: "departments" as const,
+        departments: await departmentsWithConfirmedStock(
+          published,
+          state.categories,
+          user,
+        ),
+      }),
+    }),
+    browseDepartment: assistantTool({
+      description:
+        "Resolve a human department name or slug and return its currently in-stock products. Use this before claiming that a named department is empty.",
+      inputSchema: z.object({
+        department: z.string().trim().min(2).max(120),
+        limit: z.number().int().min(1).max(6).default(4),
+      }),
+      execute: async ({ department, limit }) => {
+        const resolved = resolveDepartment(department, state.categories);
+        if (!resolved) return { kind: "department-not-found" as const };
+        const products = (await available())
+          .filter((product) => product.categorySlug === resolved.slug)
+          .slice(0, limit);
+        return {
+          kind: "department-products" as const,
+          department: { slug: resolved.slug, name: resolved.name },
+          products: products.map((product) => productResult(product, signedIn)),
+          priceVisibility: signedIn ? "member" : "hidden",
+        };
+      },
+    }),
     searchCatalog: assistantTool({
       description:
         "Search PAYDAN's published catalog. Use this before recommending or claiming that an item exists.",
@@ -101,12 +143,22 @@ export async function assistantTools(user: Viewer | null) {
         limit: z.number().int().min(1).max(6).default(4),
       }),
       execute: async ({ query, category, limit }) => {
+        const department = category
+          ? resolveDepartment(category, state.categories)
+          : undefined;
         const candidates = category
-          ? published.filter((product) => product.categorySlug === category)
+          ? department
+            ? published.filter(
+                (product) => product.categorySlug === department.slug,
+              )
+            : []
           : published;
         const products = await rankedProducts(query, candidates, limit);
         return {
           kind: "products" as const,
+          department: department
+            ? { slug: department.slug, name: department.name }
+            : undefined,
           products: products.map((product) => productResult(product, signedIn)),
           priceVisibility: signedIn ? "member" : "hidden",
         };

@@ -6,7 +6,7 @@ export async function GET() {
   return Response.json(await publicCatalogSnapshot(), {
     headers: {
       "Cache-Control":
-        "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+        "public, max-age=0, s-maxage=0, must-revalidate",
       "Content-Type": "application/json; charset=utf-8",
       "X-Content-Type-Options": "nosniff",
     },
