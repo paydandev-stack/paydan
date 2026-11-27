@@ -409,9 +409,19 @@ export default function AdminEditProductPage() {
         title={product.name}
         description={`${product.sku} · ${categoryName} · supplied by ${vendorName} · last updated ${formatDateTime(product.updatedAt)}`}
         action={
-          <Link className="admin-btn quiet" href="/admin/products">
-            Back to products
-          </Link>
+          <>
+            <Link
+              className="admin-btn secondary"
+              href={`/admin/inventory?query=${encodeURIComponent(product.sku)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Manage inventory
+            </Link>
+            <Link className="admin-btn quiet" href="/admin/products">
+              Back to products
+            </Link>
+          </>
         }
       />
 

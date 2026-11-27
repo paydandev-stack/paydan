@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { getAdminRecords } from "@/lib/admin-records";
 import { downloadCsv, parseCsv } from "@/lib/csv";
@@ -32,12 +33,13 @@ type Movement = {
 };
 
 export default function InventoryPage() {
+  const searchParams = useSearchParams();
   const { state, actions, refresh } = useDemo();
   const [stock, setStock] = useState<Record<string, number>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [movements, setMovements] = useState<Movement[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => searchParams.get("query") ?? "");
   const [vendor, setVendor] = useState("all");
   const [category, setCategory] = useState("all");
   const [lowOnly, setLowOnly] = useState(false);
